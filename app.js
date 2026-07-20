@@ -53,11 +53,11 @@
     "Sem ocorrencia"
   ];
   // Configure these four values with the credentials of Cliente 2 before publishing.
-  const SUPABASE_URL = "https://SEU_PROJECT_REF.supabase.co";
+  const SUPABASE_URL = "https://fumahtcluzftzosadulx.supabase.co";
   const SUPABASE_ANON_KEY =
-    "SUA_ANON_KEY_DO_CLIENTE_2";
-  const SUPABASE_PUBLISHABLE_KEY = "SUA_PUBLISHABLE_KEY_DO_CLIENTE_2";
-  const SUPABASE_PROJECT_ID = "SEU_PROJECT_REF";
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1bWFodGNsdXpmdHpvc2FkdWx4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NDQxMDMsImV4cCI6MjEwMDEyMDEwM30.H_LyxgAc6JwkiqCuN2bsXHpANkalyM5CWj1Iv2GLRcI";
+  const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_nUNetGGU0j9KmiPq8XOxdg_Z0RH0xo7";
+  const SUPABASE_PROJECT_ID = "fumahtcluzftzosadulx";
   const DEV_ACCESS_LOGIN = "dev1";
   const DEV_ACCESS_PASSWORD = "dev1";
   const DEV_SESSION_ID = "__dev__";
