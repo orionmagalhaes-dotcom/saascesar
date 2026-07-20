@@ -5,10 +5,13 @@ const process = require("process");
 // Polyfill fetch for older Node.js if needed, or rely on global fetch in Node 18+
 const fetch = global.fetch;
 
-const SUPABASE_URL = process.env.SUPABASE_URL || "https://fquiicsdvjqzrbeiuaxo.supabase.co";
+const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY =
-    process.env.SUPABASE_ANON_KEY ||
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxdWlpY3NkdmpxenJiZWl1YXhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5NDMxMDksImV4cCI6MjA4NjUxOTEwOX0.JYRxM0TJa1zEvqUPfMDWlCYnUfOlGR5oq7UoVaonL7w";
+    process.env.SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error("Defina SUPABASE_URL e SUPABASE_ANON_KEY do Cliente 2 antes de executar este script.");
+}
 
 function isoNow() {
     return new Date().toISOString();

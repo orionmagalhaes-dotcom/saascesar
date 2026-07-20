@@ -1,4 +1,4 @@
--- Execute no SQL Editor do Supabase (projeto fquiicsdvjqzrbeiuaxo)
+-- Execute no SQL Editor do Supabase do Cliente 2.
 -- Nota: este app e cliente-side puro. Em producao, idealmente mova escrita para
 -- uma Edge Function com validacao de identidade/autorizacao.
 

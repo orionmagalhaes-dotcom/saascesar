@@ -52,11 +52,12 @@
     "Cortesia",
     "Sem ocorrencia"
   ];
-  const SUPABASE_URL = "https://fquiicsdvjqzrbeiuaxo.supabase.co";
+  // Configure these four values with the credentials of Cliente 2 before publishing.
+  const SUPABASE_URL = "https://SEU_PROJECT_REF.supabase.co";
   const SUPABASE_ANON_KEY =
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxdWlpY3NkdmpxenJiZWl1YXhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5NDMxMDksImV4cCI6MjA4NjUxOTEwOX0.JYRxM0TJa1zEvqUPfMDWlCYnUfOlGR5oq7UoVaonL7w";
-  const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_hrVkbcMHzu04NcpSvttgrw_VIiVctr-";
-  const SUPABASE_PROJECT_ID = "fquiicsdvjqzrbeiuaxo";
+    "SUA_ANON_KEY_DO_CLIENTE_2";
+  const SUPABASE_PUBLISHABLE_KEY = "SUA_PUBLISHABLE_KEY_DO_CLIENTE_2";
+  const SUPABASE_PROJECT_ID = "SEU_PROJECT_REF";
   const DEV_ACCESS_LOGIN = "dev1";
   const DEV_ACCESS_PASSWORD = "dev1";
   const DEV_SESSION_ID = "__dev__";

@@ -35,14 +35,18 @@ Use estas configuracoes no projeto Pages:
 
 ## Supabase
 
-Projeto configurado:
+Antes de publicar para um novo cliente, crie um projeto Supabase separado, execute nele o SQL abaixo e informe as credenciais novas em `app.js`:
 
-- Project ID: `fquiicsdvjqzrbeiuaxo`
-- URL: `https://fquiicsdvjqzrbeiuaxo.supabase.co`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_PROJECT_ID`
 
 Para ativar a sincronizacao em nuvem, execute no SQL Editor:
 
 - `supabase/schema.sql`
+
+Os scripts que alteram dados exigem `SUPABASE_URL` e `SUPABASE_ANON_KEY` como variaveis de ambiente; eles nao possuem mais acesso padrao ao projeto anterior.
 
 ## Logins de teste
 
