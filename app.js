@@ -4523,6 +4523,70 @@
     return state.openComandas.find((c) => c.id === comandaId) || state.closedComandas.find((c) => c.id === comandaId) || findComandaInHistory(comandaId);
   }
 
+  function formatEventTypeTagForHistory(e) {
+    if (!e) return "";
+    const type = e.type || "";
+    const isActorAdmin = e.actorRole === "admin" || String(e.actorName || "").toLowerCase().includes("admin");
+    
+    if (type === "comanda_aberta") {
+      return `<span class="tag event-type-tag event-type-gray">Comanda aberta</span>`;
+    }
+    if (type === "comanda_finalizada" || type === "comanda_finalizada_auto") {
+      return `<span class="tag event-type-tag event-type-green">Comanda finalizada</span>`;
+    }
+    if (type === "item_add" || type === "garcom_adicionou_pedido" || type.includes("adicionou") || type === "venda_avulsa" || type.includes("fiado_ajuste_produto_add")) {
+      const actorLabel = isActorAdmin ? "administrador" : "garçom";
+      return `<span class="tag event-type-tag event-type-blue">Adicionado pelo ${actorLabel}</span>`;
+    }
+    
+    // Fallback:
+    const label = eventTypeLabel(type);
+    return `<span class="tag event-type-tag event-type-gray">${esc(label)}</span>`;
+  }
+
+  function formatEventDetailForHistory(e, comanda) {
+    if (!e) return "";
+    const type = e.type || "";
+    const detail = String(e.detail || "");
+    
+    if (type === "comanda_aberta") {
+      return "(Início do atendimento)";
+    }
+    
+    if (type === "comanda_finalizada" || type === "comanda_finalizada_auto") {
+      const valMatch = detail.match(/no valor (R\$\s*\d+[\d,.]*)/i);
+      const val = valMatch ? valMatch[1] : (comanda ? money(comandaTotal(comanda)) : "");
+      
+      let methodText = "";
+      if (detail.includes("Dinheiro")) methodText = "Dinheiro";
+      else if (detail.includes("Pix")) methodText = "Pix";
+      else if (detail.includes("Debito") || detail.includes("debito")) methodText = "Débito";
+      else if (detail.includes("Credito") || detail.includes("credito")) methodText = "Crédito";
+      else if (detail.includes("Fiado") || detail.includes("fiado")) methodText = "Fiado";
+      else methodText = comanda ? comandaPaymentText(comanda, { includeAmount: false }) : "";
+      
+      if (!methodText) methodText = "Dinheiro";
+      
+      return `(Total ${val}, Pago em ${methodText})`;
+    }
+    
+    const addMatch = detail.match(/Item (.*?) x(\d+) adicionado/i) || detail.match(/Venda avulsa.*? (.*?) x(\d+)/i) || detail.match(/adicionou (\d+)x (.*?)/i) || detail.match(/Adicionou (\d+)x (.*?)/i);
+    if (addMatch) {
+      let qty = "";
+      let name = "";
+      if (detail.match(/Item (.*?) x(\d+) adicionado/i) || detail.match(/Venda avulsa.*? (.*?) x(\d+)/i)) {
+        name = addMatch[1];
+        qty = addMatch[2];
+      } else {
+        qty = addMatch[1];
+        name = addMatch[2];
+      }
+      return `(Adicionou ${qty}x ${name} ao pedido)`;
+    }
+    
+    return `(${detail})`;
+  }
+
   function renderComandaDetailsBox() {
     if (!uiState.comandaDetailsId) return "";
     const comanda = findComandaForDetails(uiState.comandaDetailsId);
@@ -4551,6 +4615,95 @@
     const showReadOnlyAdminNotice = isAdminOrDev(viewer) && !isOpenComanda && !isFiadoPendingComanda;
     const inlineEditMode =
       showAdminControls && String(uiState.adminInlineEditComandaId || "") === String(comanda.id || "");
+
+    if (!showAdminControls) {
+      const rows = (comanda.items || [])
+        .map((item) => {
+          const itemStatus = item.canceled ? "Cancelado" : item.delivered ? "Entregue" : "Pendente";
+          const statusClass = item.canceled ? "status-cancelado" : item.delivered ? "status-entregue" : "status-pendente";
+          const statusHtml = `<span class="status-pill ${statusClass}">${itemStatus}</span>`;
+          return `
+            <tr>
+              <td><b>${esc(item.name)}</b></td>
+              <td class="separator-col">|</td>
+              <td class="center-col">${item.qty}</td>
+              <td class="separator-col">|</td>
+              <td class="price-col">${money(item.priceAtSale)}</td>
+              <td class="separator-col">|</td>
+              <td class="status-col">${statusHtml}</td>
+              <td class="separator-col">|</td>
+              <td>${esc(item.waiterNote || "-")}</td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      const comandaEvents = (comanda.events || []).slice(-40).reverse();
+      const events = comandaEvents
+        .map((e) => {
+          const dateStr = formatDateTime(e.ts);
+          const tagHtml = formatEventTypeTagForHistory(e);
+          const detailHtml = formatEventDetailForHistory(e, comanda);
+          return `
+            <tr>
+              <td class="event-time-col">${dateStr}</td>
+              <td class="event-actor-col">${esc(e.actorName)}</td>
+              <td class="event-detail-col">
+                <div class="event-pill-row">${tagHtml}</div>
+                <div class="event-subtext-row">${esc(detailHtml)}</div>
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      return `
+        <div class="comanda-details-container history-comanda-details" style="margin-top:0.75rem;">
+          <div class="details-section-header">
+            <h4>DETALHES DA COMANDA (Nº ${esc(displayComandaId(comanda.id))})</h4>
+            <button class="btn secondary close-details-btn" data-action="close-comanda-details">Fechar</button>
+          </div>
+          
+          <div class="details-card-table">
+            <table class="comanda-details-table">
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th class="separator-col">|</th>
+                  <th class="center-col">Qtd</th>
+                  <th class="separator-col">|</th>
+                  <th class="price-col">Unit.</th>
+                  <th class="separator-col">|</th>
+                  <th class="status-col">Status</th>
+                  <th class="separator-col">|</th>
+                  <th>Obs</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows || `<tr><td colspan="9">Sem itens.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+          
+          <h4 style="margin-top: 1.5rem; margin-bottom: 0.5rem; font-weight: bold; text-transform: uppercase;">HISTÓRICO DE ALTERAÇÕES (REGISTRO INFORMATIVO)</h4>
+          
+          <div class="details-card-table">
+            <table class="comanda-history-table">
+              <thead>
+                <tr>
+                  <th>Data/Hora</th>
+                  <th>Ator</th>
+                  <th>Ação / Tipo (Detalhes)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${events || `<tr><td colspan="3">Sem eventos.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
 
     const rows = (comanda.items || [])
       .map((item) => {
@@ -5550,47 +5703,21 @@
     const methodOptions = PAYMENT_METHODS.map((m) => `<option value="${m.value}">${m.label}</option>`).join("");
     const zeroTotalNote = Math.max(0, parseNumber(total || 0)) <= 0.01
       ? `<div class="note">Esta comanda totaliza ${money(0)}. Voce pode finalizar sem informar pagamento.</div>`
-      : `<div class="note">Confira dados e escolha uma ou mais formas de pagamento. A soma deve bater com o total da comanda.</div>`;
+      : `<div class="note">Confira os dados e escolha a forma de pagamento.</div>`;
     return `
       <form class="card form" data-role="finalize-form" data-comanda-id="${comanda.id}">
         <h4>Finalizacao da comanda ${esc(displayComandaId(comanda.id))}</h4>
         ${zeroTotalNote}
         <div class="grid cols-2">
           <div class="field">
-            <label>Pagamento principal</label>
+            <label>Forma de pagamento</label>
             <select name="paymentMethodPrimary" data-role="payment-method">
               ${methodOptions}
             </select>
           </div>
           <div class="field">
-            <label>Valor principal</label>
-            <input name="paymentAmountPrimary" data-role="payment-amount" value="${totalFixed}" />
-          </div>
-        </div>
-        <div class="grid cols-2">
-          <div class="field">
-            <label>Pagamento complementar 1 (opcional)</label>
-            <select name="paymentMethodExtra1" data-role="payment-method">
-              <option value="">Nao usar</option>
-              ${methodOptions}
-            </select>
-          </div>
-          <div class="field">
-            <label>Valor complementar 1</label>
-            <input name="paymentAmountExtra1" data-role="payment-amount" value="0" />
-          </div>
-        </div>
-        <div class="grid cols-2">
-          <div class="field">
-            <label>Pagamento complementar 2 (opcional)</label>
-            <select name="paymentMethodExtra2" data-role="payment-method">
-              <option value="">Nao usar</option>
-              ${methodOptions}
-            </select>
-          </div>
-          <div class="field">
-            <label>Valor complementar 2</label>
-            <input name="paymentAmountExtra2" data-role="payment-amount" value="0" />
+            <label>Valor a pagar</label>
+            <input name="paymentAmountPrimary" data-role="payment-amount" value="${totalFixed}" readonly />
           </div>
         </div>
         <div class="note" data-role="payment-breakdown-note">Divisao ainda nao conferida.</div>
@@ -5840,6 +5967,7 @@
   }
 
   function renderWaiterReadyModal() {
+    return "";
     const rows = uiState.waiterReadyModalItems || [];
     if (!rows.length) return "";
     const hasDanger = rows.some((row) => row.status === "em_falta");
@@ -6161,6 +6289,7 @@
   }
 
   function renderWaiterKitchenReceiptNotice() {
+    return "";
     const notices = uiState.waiterKitchenReceiptNotices || [];
     if (!notices.length) return "";
     const latest = notices[0];
@@ -6947,6 +7076,7 @@
       kitchenReceivedById: null,
       kitchenReceivedByName: "",
       kitchenAlertUnread: Boolean(draft.needsKitchen),
+      kitchenPrinted: false,
       waiterVisualState: "new",
       waiterVisualUpdatedAt: isoNow(),
       deliveryRequested: Boolean(draft.isDelivery),
@@ -9237,17 +9367,7 @@
       {
         method: String(form.paymentMethodPrimary?.value || "").trim(),
         amountRaw: String(form.paymentAmountPrimary?.value || "0").trim(),
-        rowName: "pagamento principal"
-      },
-      {
-        method: String(form.paymentMethodExtra1?.value || "").trim(),
-        amountRaw: String(form.paymentAmountExtra1?.value || "0").trim(),
-        rowName: "pagamento complementar 1"
-      },
-      {
-        method: String(form.paymentMethodExtra2?.value || "").trim(),
-        amountRaw: String(form.paymentAmountExtra2?.value || "0").trim(),
-        rowName: "pagamento complementar 2"
+        rowName: "pagamento"
       }
     ], total);
   }
@@ -9264,9 +9384,7 @@
     const total = comanda ? comandaTotal(comanda) : 0;
     const isZeroTotal = Math.max(0, parseNumber(total || 0)) <= 0.01;
     const selectedMethods = [
-      String(form.paymentMethodPrimary?.value || "").trim(),
-      String(form.paymentMethodExtra1?.value || "").trim(),
-      String(form.paymentMethodExtra2?.value || "").trim()
+      String(form.paymentMethodPrimary?.value || "").trim()
     ].filter(Boolean);
 
     const parsed = parseFinalizePaymentSplits(form, total);
@@ -9717,8 +9835,8 @@
     const notesText = (comanda?.notes || []).join(" | ");
 
     if (isOrderTicket) {
-      const itemsText = (comanda?.items || [])
-        .filter((i) => i && !i.canceled)
+      const targetItems = Array.isArray(options.itemsToPrint) ? options.itemsToPrint : (comanda?.items || []).filter((i) => i && !i.canceled);
+      const itemsText = targetItems
         .map((item) => {
           const obs = item.waiterNote ? `  * OBS COZINHA: ${item.waiterNote}\n` : "";
           const del = item.deliveryRequested ? `  * PARA VIAGEM: ${item.deliveryRecipient} - ${item.deliveryLocation}\n` : "";
@@ -9796,10 +9914,22 @@
     let html = "";
     const paperWidthMm = normalizePrinterPrefs(uiState.printerPrefs).receiptPaperWidthMm;
 
+    let itemsToPrint = [];
+    if (isOrderTicket) {
+      itemsToPrint = (comanda.items || []).filter((i) => i && !i.canceled && !i.kitchenPrinted);
+      if (itemsToPrint.length === 0) {
+        const reprint = confirm("Todos os itens desse pedido já foram enviados para a cozinha. Deseja reimprimir o pedido completo?");
+        if (reprint) {
+          itemsToPrint = (comanda.items || []).filter((i) => i && !i.canceled);
+        } else {
+          return;
+        }
+      }
+    }
+
     if (isOrderTicket) {
       // 1. KITCHEN / ORDER TICKET (Pedido)
-      const rows = (comanda.items || [])
-        .filter((i) => i && !i.canceled)
+      const rows = itemsToPrint
         .map((i) => {
           const qty = parseNumber(i.qty || 0);
           const obs = i.waiterNote ? `<div class="item-obs">-> OBS COZINHA: <b>${esc(i.waiterNote)}</b></div>` : "";
@@ -9962,10 +10092,23 @@
       `;
     }
 
-    const receiptText = buildComandaReceiptText(comanda, { isOrderTicket });
+    const receiptText = buildComandaReceiptText(comanda, { isOrderTicket, itemsToPrint });
 
     if (isAndroidDevice()) {
       imprimirCupomIntent(receiptText);
+      if (isOrderTicket) {
+        let markedAny = false;
+        for (const item of itemsToPrint) {
+          if (!item.kitchenPrinted) {
+            item.kitchenPrinted = true;
+            markedAny = true;
+          }
+        }
+        if (markedAny) {
+          saveState();
+          render();
+        }
+      }
       return true;
     }
 
@@ -9977,6 +10120,19 @@
         if (!options.silent) alert(message);
         else console.warn(message);
       }
+      if (isOrderTicket) {
+        let markedAny = false;
+        for (const item of itemsToPrint) {
+          if (!item.kitchenPrinted) {
+            item.kitchenPrinted = true;
+            markedAny = true;
+          }
+        }
+        if (markedAny) {
+          saveState();
+          render();
+        }
+      }
       return true;
     }
     if (options.silent) return;
@@ -9984,6 +10140,19 @@
       previewTitle: `Pedido ${displayComandaId(comanda.id)}`,
       previewSubtitle: "Nota de consumo para conferencia do cliente"
     });
+    if (isOrderTicket) {
+      let markedAny = false;
+      for (const item of itemsToPrint) {
+        if (!item.kitchenPrinted) {
+          item.kitchenPrinted = true;
+          markedAny = true;
+        }
+      }
+      if (markedAny) {
+        saveState();
+        render();
+      }
+    }
     return true;
   }
 

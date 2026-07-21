@@ -3117,3 +3117,160 @@ td {
     width: 100%;
   }
 }
+
+/* Read-only comanda details premium layout */
+.history-comanda-details {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  margin-top: 1rem;
+}
+
+.details-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.details-section-header h4 {
+  font-weight: 800;
+  color: var(--ink);
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: 0.5px;
+}
+
+.close-details-btn {
+  padding: 0.35rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.details-card-table {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+}
+
+.comanda-details-table,
+.comanda-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.comanda-details-table th,
+.comanda-details-table td,
+.comanda-history-table th,
+.comanda-history-table td {
+  padding: 0.6rem 0.5rem;
+  text-align: left;
+  border-bottom: none;
+}
+
+.comanda-details-table th,
+.comanda-history-table th {
+  font-weight: 800;
+  color: var(--ink);
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.separator-col {
+  width: 30px;
+  text-align: center !important;
+  color: var(--muted);
+  opacity: 0.4;
+  font-weight: normal !important;
+}
+
+.center-col {
+  text-align: center !important;
+  width: 60px;
+}
+
+.price-col {
+  text-align: left !important;
+  width: 90px;
+}
+
+.status-col {
+  width: 100px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-pill.status-pendente {
+  background: var(--ok-bg);
+  color: var(--ok-text);
+}
+
+.status-pill.status-entregue {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.status-pill.status-cancelado {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+/* History table */
+.comanda-history-table td {
+  vertical-align: top;
+  border-bottom: 1px solid #f4f4f5;
+}
+
+.comanda-history-table tr:last-child td {
+  border-bottom: none;
+}
+
+.event-time-col {
+  width: 160px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.event-actor-col {
+  width: 150px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.event-pill-row {
+  margin-bottom: 0.25rem;
+}
+
+.event-subtext-row {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.event-type-tag.event-type-green {
+  border-color: var(--ok-border) !important;
+  background: var(--ok-bg) !important;
+  color: var(--ok-text) !important;
+}
+.event-type-tag.event-type-blue {
+  border-color: var(--info-border) !important;
+  background: var(--info-bg) !important;
+  color: var(--info-text) !important;
+}
+.event-type-tag.event-type-gray {
+  border-color: var(--line) !important;
+  background: var(--panel-2) !important;
+  color: var(--muted) !important;
+}
