@@ -525,47 +525,227 @@ th {
 .kitchen-board {
   display: grid;
   gap: 0.62rem;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 .kitchen-order-card {
-  border: 1px solid #304867;
-  border-radius: 12px;
-  background: #101b2b;
-  padding: 0.64rem;
+  border: 1px solid #e2e6ef;
+  border-radius: 24px;
+  background: #ffffff;
+  padding: 1rem;
   display: grid;
-  gap: 0.52rem;
+  gap: 1rem;
+  min-width: 0;
+  box-shadow: 0 22px 40px rgba(17, 29, 49, 0.08);
 }
 
 .kitchen-order-card.status-queue {
-  border-color: #8b6a1a;
-  background: linear-gradient(180deg, #2f240f 0%, #241d0d 100%);
+  border-color: #f4b647;
 }
 
 .kitchen-order-card.status-cooking {
-  border-color: #a85f22;
-  background: linear-gradient(180deg, #322113 0%, #24190f 100%);
+  border-color: #f7b15a;
 }
 
 .kitchen-order-card.status-missing {
-  border-color: #8b2f3b;
-  background: linear-gradient(180deg, #351a20 0%, #251218 100%);
+  border-color: #ea6b74;
 }
 
 .kitchen-order-card.status-done {
-  border-color: #2c7a49;
-  background: linear-gradient(180deg, #122b1b 0%, #0f2216 100%);
+  border-color: #5cbd8f;
+}
+
+.kitchen-order-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.kitchen-order-header-top {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.kitchen-order-code,
+.kitchen-order-table {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.85rem;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #0f172a;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.kitchen-order-eta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 110px;
+  padding: 0.8rem 1rem;
+  background: #e2e8f0;
+  border-radius: 18px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.kitchen-order-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.55rem;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.kitchen-order-status-badge.status-cooking {
+  background: #fff4e5;
+}
+
+.kitchen-order-status-badge.status-missing {
+  background: #ffe9ec;
+}
+
+.kitchen-order-status-badge.status-done {
+  background: #e8f7ee;
+}
+
+.kitchen-order-status-badge.status-queue {
+  background: #fff4df;
+}
+
+.kitchen-order-main {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1rem;
+  align-items: center;
+}
+
+.kitchen-order-qty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  min-height: 56px;
+  border-radius: 18px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 800;
+  font-size: 1.1rem;
+}
+
+.kitchen-order-description h3 {
+  margin: 0;
+  font-size: 1.4rem;
+  line-height: 1.05;
+  color: #111827;
+}
+
+.kitchen-order-note {
+  margin: 0.65rem 0 0;
+  color: #334155;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  background: #f8fafc;
+  padding: 0.85rem 1rem;
+  border-radius: 18px;
+}
+
+.kitchen-order-info-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.kitchen-order-info-row {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+.kitchen-order-info-row span {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.kitchen-order-info-row strong {
+  display: block;
+  font-size: 1rem;
+  color: #0f172a;
+  line-height: 1.3;
+}
+
+.kitchen-order-actions {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.kitchen-order-actions .btn {
+  min-height: 58px;
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 16px;
+}
+
+.kitchen-order-actions .btn.primary {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.kitchen-order-actions .btn.danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.kitchen-order-actions .btn.ok {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.kitchen-order-actions .btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.kitchen-order-note {
+  margin: 0.65rem 0 0;
+  color: #334155;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  background: #f8fafc;
+  padding: 0.85rem 1rem;
+  border-radius: 18px;
 }
 
 .kitchen-order-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .kitchen-order-head-actions {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.38rem;
   justify-items: end;
   flex: 0 0 auto;
 }
@@ -607,39 +787,26 @@ th {
   color: #95edb8;
 }
 
-.kitchen-order-pill.priority.normal {
-  border-color: #446186;
-  background: #15263d;
-  color: #d0e4ff;
-}
-
-.kitchen-order-pill.priority.high {
-  border-color: #8f6621;
-  background: #3a2b12;
-  color: #ffce79;
-}
-
-.kitchen-order-pill.priority.max {
-  border-color: #8b2f3b;
-  background: #3d1820;
-  color: #ff9dab;
-}
-
 .kitchen-order-status {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 0.18rem 0.54rem;
   font-size: 0.72rem;
   font-weight: 800;
   flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f9f9fb;
 }
 
-.kitchen-order-status.queue {
-  background: #2e240e;
-  border-color: #8b6a1a;
-  color: #ffde77;
+.kitchen-order-status.queue,
+.kitchen-order-status.cooking,
+.kitchen-order-status.missing,
+.kitchen-order-status.done {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #f9f9fb;
 }
 
 .kitchen-order-status.cooking {
@@ -671,7 +838,6 @@ th {
 }
 
 .kitchen-order-card.is-collapsed .kitchen-order-meta,
-.kitchen-order-card.is-collapsed .kitchen-priority-actions,
 .kitchen-order-card.is-collapsed .kitchen-order-note,
 .kitchen-order-card.is-collapsed .kitchen-order-more,
 .kitchen-order-card.is-collapsed .kitchen-order-actions {
@@ -685,7 +851,7 @@ th {
 .kitchen-order-meta {
   display: grid;
   gap: 0.4rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .kitchen-meta-box {
@@ -699,10 +865,6 @@ th {
 
 .kitchen-order-meta-main .meta-delivery {
   grid-column: span 2;
-}
-
-.kitchen-order-meta-main .meta-priority {
-  border-color: #8f6621;
 }
 
 .kitchen-order-meta span {
@@ -729,32 +891,9 @@ th {
   overflow-wrap: anywhere;
 }
 
-.kitchen-priority-actions {
-  display: grid;
-  gap: 0.34rem;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
 
-.kitchen-priority-actions .btn {
-  min-height: 34px;
-  padding: 0.3rem 0.4rem;
-  font-size: 0.76rem;
-  line-height: 1.1;
-}
-
-.kitchen-priority-actions .btn.is-active {
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
-}
-
-.kitchen-priority-actions .btn:disabled {
-  opacity: 0.9;
-  cursor: default;
-}
-
-.kitchen-priority-actions .kitchen-priority-ignore.is-active {
-  border-color: #4e7194;
-  background: #1b3049;
-  color: #b7dcff;
+.kitchen-order-meta-main {
+  margin-top: 0.8rem;
 }
 
 .kitchen-order-more {
@@ -795,9 +934,9 @@ th {
 }
 
 .kitchen-order-actions .btn {
-  min-height: 36px;
+  min-height: 34px;
   padding: 0.36rem 0.46rem;
-  font-size: 0.79rem;
+  font-size: 0.78rem;
   white-space: normal;
 }
 
@@ -1201,13 +1340,13 @@ th {
 }
 
 .card.comanda-lista-azul {
-  border-color: #2b5f99;
-  background: linear-gradient(180deg, #111b2f 0%, #0e1729 100%);
+  border-color: #f59e0b;
+  background: linear-gradient(180deg, #fffaf0 0%, #f8f2e0 100%);
 }
 
 .card.comanda-lista-laranja {
-  border-color: #8d5f2a;
-  background: linear-gradient(180deg, #22170d 0%, #1a130c 100%);
+  border-color: #d97706;
+  background: linear-gradient(180deg, #fff7ed 0%, #f7ede1 100%);
 }
 
 .detail-header {
@@ -1218,38 +1357,38 @@ th {
 }
 
 .compact-details {
-  border: 1px solid #2f3a54;
+  border: 1px solid #e5d7b7;
   border-radius: 12px;
-  background: #121824;
-  padding: 0.52rem 0.65rem;
+  background: #fffdf7;
+  padding: 0.65rem 0.75rem;
 }
 
 .compact-details > summary {
   cursor: pointer;
   font-weight: 800;
-  color: #d7e8ff;
+  color: #1f2937;
 }
 
 .compact-details[open] {
-  background: #141b28;
+  background: #fef6e1;
 }
 
 .compact-details.comanda-status-aberta {
-  border-color: #2b5f99;
-  background: #121e33;
+  border-color: #fbbf24;
+  background: #fff8dc;
 }
 
 .compact-details.comanda-status-aberta[open] {
-  background: #15253e;
+  background: #fef1c7;
 }
 
 .compact-details.comanda-status-fechada {
-  border-color: #8d5f2a;
-  background: #24190f;
+  border-color: #d97706;
+  background: #fff1dd;
 }
 
 .compact-details.comanda-status-fechada[open] {
-  background: #2a1d12;
+  background: #f9e6cd;
 }
 
 .tag.status-comanda-aberta {
@@ -1449,7 +1588,7 @@ th {
   margin-top: 0.65rem;
   display: grid;
   gap: 0.62rem;
-  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 .monitor-order-card {
@@ -1651,8 +1790,7 @@ th {
 }
 
 .monitor-order-details .monitor-order-meta,
-.monitor-order-details .monitor-order-actions,
-.monitor-order-details .monitor-order-priority {
+.monitor-order-details .monitor-order-actions {
   margin-top: 0.38rem;
 }
 
@@ -1672,28 +1810,24 @@ th {
   display: none;
 }
 
-.monitor-order-actions,
-.monitor-order-priority {
+.monitor-order-actions {
   display: grid;
   gap: 0.34rem;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.monitor-order-actions .btn,
-.monitor-order-priority .btn {
+.monitor-order-actions .btn {
   min-height: 33px;
   padding: 0.3rem 0.34rem;
   font-size: 0.75rem;
   line-height: 1.08;
 }
 
-.monitor-order-actions .btn.is-active,
-.monitor-order-priority .btn.is-active {
+.monitor-order-actions .btn.is-active {
   box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
 }
 
-.monitor-order-actions .btn:disabled,
-.monitor-order-priority .btn:disabled {
+.monitor-order-actions .btn:disabled {
   opacity: 0.9;
   cursor: default;
 }
@@ -2032,17 +2166,6 @@ th {
     line-height: 1.1;
   }
 
-  .kitchen-priority-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.24rem;
-  }
-
-  .kitchen-priority-actions .btn {
-    min-height: 30px;
-    font-size: 0.73rem;
-    padding: 0.32rem 0.34rem;
-  }
-
   .monitor-order-head {
     flex-direction: column;
     align-items: stretch;
@@ -2061,13 +2184,11 @@ th {
     grid-column: auto;
   }
 
-  .monitor-order-actions,
-  .monitor-order-priority {
+  .monitor-order-actions {
     gap: 0.26rem;
   }
 
-  .monitor-order-actions .btn,
-  .monitor-order-priority .btn {
+  .monitor-order-actions .btn {
     min-height: 32px;
     font-size: 0.73rem;
     padding: 0.32rem 0.3rem;
@@ -2635,6 +2756,158 @@ td {
   font-weight: 800;
   padding: 0.18rem 0.58rem;
   font-size: 0.88rem;
+}
+
+.detail-box {
+  border: 1px solid #e4e4e7;
+  border-radius: var(--radius-lg);
+  padding: 0.9rem;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfaf8 100%);
+  box-shadow: var(--shadow);
+}
+
+.detail-box.admin-comanda-detail-view {
+  border-color: #fcd34d;
+  background: linear-gradient(180deg, #fffdf8 0%, #f7f5ef 100%);
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid #ece7de;
+}
+
+.detail-title-group h4 {
+  margin-top: 0.35rem;
+  color: #78350f;
+}
+
+.detail-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.detail-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.58rem;
+  font-size: 0.74rem;
+  font-weight: 800;
+  border: 1px solid transparent;
+}
+
+.detail-badge-accent {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.detail-badge-open {
+  background: #f8fafc;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+
+.detail-badge-closed {
+  background: #f3f4f6;
+  color: #4b5563;
+  border-color: #d1d5db;
+}
+
+.detail-meta-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+}
+
+.detail-meta-grid.secondary {
+  margin-top: 0.45rem;
+}
+
+.detail-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #e4e4e7;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374151;
+  padding: 0.28rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.detail-meta-chip.subtle {
+  background: #fafaf9;
+  color: #52525b;
+}
+
+.detail-comanda-surface {
+  margin-top: 0.7rem;
+  padding: 0.6rem;
+  border: 1px solid #e4e4e7;
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+}
+
+.detail-comanda-surface .comanda-card {
+  background: #ffffff;
+  border-color: #e4e4e7;
+  box-shadow: none;
+}
+
+.detail-comanda-surface .comanda-identity-box {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #fcd34d;
+}
+
+.detail-comanda-surface .comanda-identity-label {
+  color: #92400e;
+}
+
+.detail-comanda-surface .comanda-identity-id {
+  color: #78350f;
+}
+
+.detail-table-wrap {
+  border: 1px solid #e4e4e7;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.detail-box table {
+  background: #ffffff;
+  color: #374151;
+}
+
+.detail-box th {
+  background: #f8f8f5;
+  color: #6b7280;
+  border-bottom: 1px solid #ece7de;
+}
+
+.detail-box td {
+  border-bottom: 1px solid #f2efe8;
+  color: #374151;
+}
+
+.detail-box .compact-details {
+  background: #ffffff;
+  border-color: #e4e4e7;
+}
+
+.detail-box .compact-details > summary {
+  color: #78350f;
+}
+
+.detail-box .compact-details[open] {
+  background: #fefdf8;
 }
 
 /* --- Item Rows Inside Comandas --- */
