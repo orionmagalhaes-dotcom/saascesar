@@ -1,11 +1,11 @@
 {
-  "name": "Brancao (Lanches, hamburgueres e petiscos)",
-  "short_name": "Brancao",
+  "name": "POPEYE HAMUBURGUERIA ARTESANAL",
+  "short_name": "Popeye Burger",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#000000",
-  "description": "Controle de restaurante/bar do Brancao com admin e garcom.",
+  "background_color": "#fff8df",
+  "theme_color": "#ffd21a",
+  "description": "Controle de pedidos da POPEYE HAMUBURGUERIA ARTESANAL.",
   "icons": [
     {
       "src": "./icon-192.png",

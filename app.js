@@ -22,9 +22,11 @@
   const EDUARDO_RECOVERY_MARKER_KEY = "eduardo_restore_applied_v1";
   const ACCESS_CODE_WAITER_PREFIX = "Garcom Codigo";
   const SYSTEM_TEST_MARKERS = Object.freeze(["teste", "test", "mock", "pixteste", "cupom de teste"]);
-  const ESTABLISHMENT_NAME = "Brancao";
-  const CATEGORIES = ["Bar", "Dose/Copo", "Cozinha", "Espetinhos", "Avulso", "Ofertas"];
-  const BAR_SUBCATEGORIES = ["Geral"];
+  const ESTABLISHMENT_NAME = "POPEYE HAMUBURGUERIA ARTESANAL";
+  const CATEGORIES = ["Bebidas", "Lanche", "Entradas", "Ofertas"];
+  const BEVERAGE_SUBCATEGORIES = ["Geral"];
+  const SNACK_SUBCATEGORIES = ["Lanches", "Adicionais"];
+  const KITCHEN_CATEGORIES = new Set(["Lanche", "Entradas"]);
   const KITCHEN_STATUSES = [
     { value: "fila", label: "Fila de espera" },
     { value: "cozinhando", label: "Cozinhando" },
@@ -72,7 +74,7 @@
     waiter: "2222",
     cook: "3333"
   });
-  const PRINT_PIPELINE_ENABLED = false;
+  const DEFAULT_RECEIPT_PAPER_WIDTH_MM = 58;
   const AUTO_OPEN_KITCHEN_PREVIEW_ON_ADD = false;
 
   const app = document.getElementById("app");
@@ -696,6 +698,19 @@
     return preferLocal ? localRow : remoteRow;
   }
 
+  function latestKitchenItemTimestamp(item) {
+    if (!item) return 0;
+    return Math.max(
+      parseUpdatedAtTimestamp(item.kitchenStatusAt),
+      parseUpdatedAtTimestamp(item.kitchenPriorityAt),
+      parseUpdatedAtTimestamp(item.kitchenReceivedAt),
+      parseUpdatedAtTimestamp(item.waiterVisualUpdatedAt),
+      parseUpdatedAtTimestamp(item.deliveredAt),
+      parseUpdatedAtTimestamp(item.canceledAt),
+      parseUpdatedAtTimestamp(item.createdAt)
+    );
+  }
+
   function mergeComandasById(localRows, remoteRows, options = {}) {
     const map = new Map();
     const allowRemoteOnly = options.allowRemoteOnly !== false;
@@ -731,8 +746,8 @@
             if (!itemId) continue;
             if (!itemMap.has(itemId)) { itemMap.set(itemId, item); continue; }
             const existing = itemMap.get(itemId);
-            const existingTs = new Date(existing?.waiterVisualUpdatedAt || existing?.kitchenReceivedAt || 0).getTime() || 0;
-            const incomingTs = new Date(item?.waiterVisualUpdatedAt || item?.kitchenReceivedAt || 0).getTime() || 0;
+            const existingTs = latestKitchenItemTimestamp(existing);
+            const incomingTs = latestKitchenItemTimestamp(item);
             if (incomingTs > existingTs) itemMap.set(itemId, item);
           }
           merged.items = [...itemMap.values()];
@@ -1628,46 +1643,43 @@
     return true;
   }
 
-  function isDoseCopoSubcategory(value) {
-    const raw = String(value || "").trim();
-    if (!raw) return false;
-    const flat = raw
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
-    return flat === "doses" || flat === "dose" || flat === "doses/copo" || flat === "dose/copo" || flat === "copo";
-  }
-
   function normalizeCategoryName(category) {
     const raw = String(category || "").trim();
-    if (!raw) return "Avulso";
+    if (!raw) return "Lanche";
     const flat = raw
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
-    if (flat === "doses" || flat === "dose" || flat === "doses/copo" || flat === "dose/copo" || flat === "copo") return "Dose/Copo";
-    if (flat === "bar" || flat === "bebida" || flat === "bebidas") return "Bar";
-    if (flat === "cozinha") return "Cozinha";
-    if (flat === "espetinho" || flat === "espetinhos" || flat === "espertinho" || flat === "espertinhos") return "Espetinhos";
-    if (flat === "avulso" || flat === "avulsos" || flat === "variedades" || flat === "variados") return "Avulso";
+    if (flat === "doses" || flat === "dose" || flat === "doses/copo" || flat === "dose/copo" || flat === "copo") return "Bebidas";
+    if (flat === "bar" || flat === "bebida" || flat === "bebidas") return "Bebidas";
+    if (flat === "cozinha" || flat === "lanche" || flat === "lanches") return "Lanche";
+    if (flat === "espetinho" || flat === "espetinhos" || flat === "espertinho" || flat === "espertinhos") return "Lanche";
+    if (flat === "adicional" || flat === "adicionais" || flat === "avulso" || flat === "avulsos" || flat === "variedades" || flat === "variados") return "Lanche";
+    if (flat === "entrada" || flat === "entradas") return "Entradas";
     if (flat === "oferta" || flat === "ofertas") return "Ofertas";
-    return "Avulso";
+    return "Lanche";
   }
 
   function normalizeProductCategory(category) {
     return normalizeCategoryName(category);
   }
 
-  function normalizeProductSubcategory(product) {
-    if (product.category !== "Bar") return "";
+  function normalizeProductSubcategory(product, normalizedCategory = product.category) {
+    if (normalizedCategory === "Lanche") {
+      const sourceCategory = String(product.category || "").trim().toLowerCase();
+      const raw = String(product.subcategory || "").trim();
+      if (["adicional", "adicionais", "avulso", "avulsos"].includes(sourceCategory) || raw === "Adicionais") return "Adicionais";
+      return "Lanches";
+    }
+    if (normalizedCategory !== "Bebidas") return "";
     const raw = String(product.subcategory || "").trim();
-    return BAR_SUBCATEGORIES.includes(raw) ? raw : "Geral";
+    return BEVERAGE_SUBCATEGORIES.includes(raw) ? raw : "Geral";
   }
 
   function normalizeComandaItem(item, fallbackId = 0) {
     const category = normalizeCategoryName(item.category);
-    const requiresKitchen = category === "Cozinha" ? true : category === "Ofertas" ? Boolean(item.requiresKitchen) : false;
-    const needsKitchen = item.needsKitchen !== undefined ? Boolean(item.needsKitchen) : requiresKitchen;
+    const requiresKitchen = KITCHEN_CATEGORIES.has(category) ? true : category === "Ofertas" ? Boolean(item.requiresKitchen) : false;
+    const needsKitchen = requiresKitchen || (item.needsKitchen !== undefined ? Boolean(item.needsKitchen) : false);
     const kitchenPriority = needsKitchen ? String(item.kitchenPriority || "normal") : "";
     const rawVisualState =
       item.waiterVisualState === "new" || item.waiterVisualState === "ready" || item.waiterVisualState === "seen"
@@ -1680,6 +1692,7 @@
       ...item,
       id: item.id || `IT-NORM-${fallbackId}`,
       category,
+      subcategory: normalizeProductSubcategory(item, category),
       requiresKitchen,
       needsKitchen,
       kitchenPriority: needsKitchen && ["normal", "comum", "alta", "maxima"].includes(kitchenPriority) ? kitchenPriority : needsKitchen ? "normal" : "",
@@ -1709,7 +1722,7 @@
 
   function normalizeProductRecord(product, fallbackId = 0) {
     const normalizedCategory = normalizeProductCategory(product.category);
-    const effectiveCategory = normalizedCategory === "Bar" && isDoseCopoSubcategory(product.subcategory) ? "Dose/Copo" : normalizedCategory;
+    const effectiveCategory = normalizedCategory;
     const normalized = {
       ...product,
       id: Number(product.id || fallbackId),
@@ -1720,10 +1733,10 @@
       prepTime: Number(product.prepTime ?? 0),
       name: String(product.name || "")
     };
-    normalized.subcategory = normalizeProductSubcategory(normalized);
+    normalized.subcategory = normalizeProductSubcategory(product, effectiveCategory);
     normalized.available = product.available !== false;
     normalized.requiresKitchen =
-      effectiveCategory === "Cozinha" ? true : effectiveCategory === "Ofertas" ? Boolean(product.requiresKitchen) : false;
+      KITCHEN_CATEGORIES.has(effectiveCategory) ? true : effectiveCategory === "Ofertas" ? Boolean(product.requiresKitchen) : false;
     return normalized;
   }
 
@@ -1914,9 +1927,13 @@
 
   function normalizePrinterPrefs(source) {
     const parsed = source && typeof source === "object" ? source : {};
+    const paperWidthMm = Number(parsed.receiptPaperWidthMm || DEFAULT_RECEIPT_PAPER_WIDTH_MM);
     return {
       kitchenDirectEnabled: parsed.kitchenDirectEnabled === true,
-      kitchenPrinterName: String(parsed.kitchenPrinterName || "").trim()
+      kitchenPrinterName: String(parsed.kitchenPrinterName || "").trim(),
+      receiptDirectEnabled: parsed.receiptDirectEnabled === true,
+      receiptPrinterName: String(parsed.receiptPrinterName || "").trim(),
+      receiptPaperWidthMm: paperWidthMm === 80 ? 80 : DEFAULT_RECEIPT_PAPER_WIDTH_MM
     };
   }
 
@@ -2073,6 +2090,74 @@
       broadcastAt: isoNow()
     };
     supabaseCtx.channel.send({ type: "broadcast", event: "state_changed", payload }).catch(() => { });
+  }
+
+  function cloneRealtimePayload(value) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_err) {
+      return value;
+    }
+  }
+
+  function publishKitchenOrderUpsert(comanda, items, actor, reason = "Novo pedido") {
+    if (!supabaseCtx.channel || !comanda) return;
+    const kitchenItems = (Array.isArray(items) ? items : []).filter((item) => item && itemNeedsKitchen(item));
+    if (!kitchenItems.length) return;
+    const payload = {
+      sessionId: clientSessionId,
+      broadcastAt: isoNow(),
+      updatedAt: normalizeIsoTimestamp(state.meta?.updatedAt) || isoNow(),
+      reason,
+      actorId: actor?.id ?? null,
+      actorRole: String(actor?.role || ""),
+      actorName: String(actor?.name || ""),
+      comanda: cloneRealtimePayload(comanda),
+      itemIds: kitchenItems.map((item) => String(item.id || "")).filter(Boolean)
+    };
+    supabaseCtx.channel.send({ type: "broadcast", event: "kitchen_order_upsert", payload }).catch(() => { });
+  }
+
+  function mergeRealtimeItems(existingItems, incomingItems) {
+    const itemMap = new Map();
+    for (const item of Array.isArray(existingItems) ? existingItems : []) {
+      const id = String(item?.id || "").trim();
+      if (id) itemMap.set(id, item);
+    }
+    for (const item of Array.isArray(incomingItems) ? incomingItems : []) {
+      const id = String(item?.id || "").trim();
+      if (!id) continue;
+      const existing = itemMap.get(id);
+      if (!existing || latestKitchenItemTimestamp(item) >= latestKitchenItemTimestamp(existing)) {
+        itemMap.set(id, item);
+      }
+    }
+    return [...itemMap.values()];
+  }
+
+  function applyKitchenOrderUpsert(payload) {
+    if (!payload || payload.sessionId === clientSessionId) return false;
+    const incoming = payload.comanda;
+    const comandaId = String(incoming?.id || "").trim();
+    if (!comandaId || !Array.isArray(incoming?.items)) return false;
+    const incomingHasKitchenOrder = incoming.items.some((item) => itemNeedsKitchen(item) && !item?.canceled);
+    if (!incomingHasKitchenOrder) return false;
+
+    const openRows = Array.isArray(state.openComandas) ? state.openComandas : [];
+    const existingIndex = openRows.findIndex((comanda) => String(comanda?.id || "").trim() === comandaId);
+    if (existingIndex >= 0) {
+      const existing = openRows[existingIndex];
+      openRows[existingIndex] = {
+        ...existing,
+        ...incoming,
+        items: mergeRealtimeItems(existing.items, incoming.items),
+        events: mergeAuditRows(existing.events, incoming.events).sort((a, b) => new Date(a?.ts || 0) - new Date(b?.ts || 0))
+      };
+    } else {
+      state.openComandas = [...openRows, incoming];
+    }
+    saveState({ skipCloud: true, touchMeta: false });
+    return true;
   }
 
   function adoptIncomingState(source) {
@@ -2500,8 +2585,8 @@
           pushRemoteMonitorEvent(message.payload);
           const user = getCurrentUser();
           if (
-            (user?.role === "admin" && (uiState.adminTab === "monitor" || uiState.adminTab === "dashboard")) ||
-            (user?.role === "dev" && (uiState.devTab === "monitor" || uiState.devTab === "dashboard"))
+            (user?.role === "admin" && (uiState.adminTab === "monitor" || uiState.adminTab === "cozinha" || uiState.adminTab === "dashboard")) ||
+            (user?.role === "dev" && (uiState.devTab === "monitor" || uiState.devTab === "cozinha" || uiState.devTab === "dashboard"))
           ) {
             render();
           }
@@ -2516,6 +2601,13 @@
         }
       })
       .on("broadcast", { event: "state_changed" }, (message) => {
+        rememberObservedRemoteUpdatedAt(message?.payload?.updatedAt);
+        debouncedRemotePullFromSupabase();
+      })
+      .on("broadcast", { event: "kitchen_order_upsert" }, (message) => {
+        if (applyKitchenOrderUpsert(message?.payload)) {
+          render();
+        }
         rememberObservedRemoteUpdatedAt(message?.payload?.updatedAt);
         debouncedRemotePullFromSupabase();
       });
@@ -2729,14 +2821,14 @@
 
   function productNeedsKitchen(product) {
     if (!product) return false;
-    if (product.category === "Cozinha") return true;
+    if (KITCHEN_CATEGORIES.has(product.category)) return true;
     return product.category === "Ofertas" && Boolean(product.requiresKitchen);
   }
 
   function itemNeedsKitchen(item) {
     if (!item) return false;
     if (item.needsKitchen !== undefined) return Boolean(item.needsKitchen);
-    if (item.category === "Cozinha") return true;
+    if (KITCHEN_CATEGORIES.has(item.category)) return true;
     return item.category === "Ofertas" && Boolean(item.requiresKitchen);
   }
 
@@ -3280,7 +3372,6 @@
     return `
       <div class="topbar">
         <div class="brand-head">
-          <img class="top-logo-subtle" src="./brand-login.png" alt="Logo" />
           <div>
           <p class="user">${esc(roleLabel(user.role))}: ${esc(user.name)} | Caixa: ${esc(state.cash.id)}</p>
           <p class="note"><span class="status-dot ${statusClass}"></span>Sincronizacao: ${esc(uiState.supabaseStatus)}${esc(statusMsg)}</p>
@@ -3354,18 +3445,6 @@
   }
 
   function categoryDisplay(category, subcategory = "") {
-    if (category === "Bar") {
-      return "Bar (Bebidas)";
-    }
-    if (category === "Dose/Copo") {
-      return "Dose/Copo";
-    }
-    if (category === "Avulso") {
-      return "Avulso (Variedades)";
-    }
-    if (category === "Ofertas") {
-      return "Ofertas";
-    }
     return category;
   }
 
@@ -3374,7 +3453,7 @@
       .map(
         (p) => {
           const offerTag = p.category === "Ofertas" ? `<span class="tag">${p.requiresKitchen ? "Oferta com cozinha" : "Oferta pronta entrega"}</span>` : "";
-          const availabilityTag = p.available === false ? `<span class="tag" style="border-color:#8b2f3b;background:#38181c;color:#ff8e99;">Indisponivel</span>` : `<span class="tag" style="border-color:#2c7a49;background:#122b1b;color:#88ebb0;">Disponivel</span>`;
+          const availabilityTag = p.available === false ? `<span class="tag item-flag-missing">Indisponivel</span>` : `<span class="tag item-flag-ready">Disponivel</span>`;
           const stockText = Number(p.stock || 0) > 0 ? Number(p.stock) : "0";
           return `
           <tr>
@@ -3438,6 +3517,12 @@
                 ${CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join("")}
               </select>
             </div>
+            <div class="field" data-role="admin-lanche-subcategory" style="display:none;">
+              <label>Tipo de lanche</label>
+              <select name="lancheSubcategory">
+                ${SNACK_SUBCATEGORIES.map((subcategory) => `<option value="${subcategory}">${subcategory}</option>`).join("")}
+              </select>
+            </div>
             <div class="field" data-role="admin-offer-kitchen" style="display:none;">
               <label><input type="checkbox" name="offerNeedsKitchen" /> Oferta depende da cozinha</label>
               <div class="note">Ative para seguir fila e status da cozinha.</div>
@@ -3470,7 +3555,7 @@
         </div>
         <div class="card">
           <h3>Categorias</h3>
-          <p class="note">Classificacao sugerida: Bar, Dose/Copo, Cozinha, Espetinhos, Avulso e Ofertas (combos e promocionais).</p>
+          <p class="note">Classificacao: Bebidas, Lanche (Lanches e Adicionais), Entradas e Ofertas (combos e promocionais).</p>
           <div class="actions" style="margin-top:0.75rem;">
             ${CATEGORIES.map((c) => `<span class="tag">${esc(c)}</span>`).join("")}
             <span class="tag">Ofertas / depende da cozinha</span>
@@ -4833,8 +4918,8 @@
           <p class="note">Solicita segunda autenticacao para evitar fechamento por engano.</p>
           <p class="note" style="margin-top:0.35rem;">${esc(openInfo)}</p>
           ${hasPendingOpen
-        ? `<div class="note" style="margin-top:0.45rem;color:#8b2f3b;"><b>Bloqueado:</b> existe(m) ${pendingOpen.length} comanda(s) aberta(s). Feche todas antes de encerrar o caixa.${pendingPreview ? ` Ex.: ${esc(pendingPreview)}${pendingOpen.length > 8 ? " ..." : ""}` : ""}</div>`
-        : `<div class="note" style="margin-top:0.45rem;color:#1e5f3a;">Todas as comandas estao fechadas. Caixa liberado para encerramento.</div>`
+        ? `<div class="note" style="margin-top:0.45rem;color:var(--danger-text);"><b>Bloqueado:</b> existe(m) ${pendingOpen.length} comanda(s) aberta(s). Feche todas antes de encerrar o caixa.${pendingPreview ? ` Ex.: ${esc(pendingPreview)}${pendingOpen.length > 8 ? " ..." : ""}` : ""}</div>`
+        : `<div class="note" style="margin-top:0.45rem;color:var(--ok-text);">Todas as comandas estao fechadas. Caixa liberado para encerramento.</div>`
       }
           <form id="close-cash-form" class="form" style="margin-top:0.75rem;" autocomplete="off">
             <div class="field">
@@ -5031,6 +5116,45 @@
     `;
   }
 
+  function renderAdminPrinting() {
+    const prefs = normalizePrinterPrefs(uiState.printerPrefs);
+    const configuredName = prefs.receiptPrinterName || "Impressora padrao do Windows";
+    return `
+      <div class="grid cols-2">
+        <section class="card">
+          <h3>Impressora de cupom</h3>
+          <p class="note">Use nesta maquina que esta pareada por Bluetooth com a MTP-II. O QZ Tray envia o cupom para a fila do Windows sem abrir a janela de impressao.</p>
+          <div class="field" style="margin-top:0.75rem;">
+            <label><input type="checkbox" data-role="receipt-direct-enabled" ${prefs.receiptDirectEnabled ? "checked" : ""} /> Imprimir cupom automaticamente ao finalizar venda</label>
+          </div>
+          <div class="field">
+            <label>Nome da impressora neste dispositivo</label>
+            <input data-role="receipt-printer-name" value="${esc(prefs.receiptPrinterName)}" placeholder="Ex.: MTP-II" />
+            <p class="note">Deixe vazio para usar a impressora padrao desta maquina.</p>
+          </div>
+          <div class="field">
+            <label>Largura do papel</label>
+            <select data-role="receipt-paper-width">
+              <option value="58" ${prefs.receiptPaperWidthMm === 58 ? "selected" : ""}>58 mm (MTP-II)</option>
+              <option value="80" ${prefs.receiptPaperWidthMm === 80 ? "selected" : ""}>80 mm</option>
+            </select>
+          </div>
+          <div class="actions">
+            <button class="btn primary" type="button" data-action="save-receipt-printer-config">Salvar configuracao</button>
+            <button class="btn secondary" type="button" data-action="print-receipt-test">Imprimir teste</button>
+          </div>
+        </section>
+        <section class="card">
+          <h3>Status e emissao fiscal</h3>
+          <p class="note">Destino atual: <b>${esc(configuredName)}</b>.</p>
+          <p class="note">O cupom termico e impresso somente nesta maquina. Pedidos dos demais celulares sincronizam pelo Supabase, mas nao tentam usar o Bluetooth deles.</p>
+          <p class="note">A MTP-II imprime o DANFE depois que a NFC-e for autorizada. A integracao com SEFAZ/provedor permanece bloqueada ate cadastrar UF, certificado e credenciais; o sistema nao apresenta cupom comum como documento fiscal.</p>
+          <p class="note">Antes do primeiro uso: pareie a MTP-II neste dispositivo, instale a ponte de impressao compativel, defina o nome acima e deixe-a aberta.</p>
+        </section>
+      </div>
+    `;
+  }
+
   function renderAdminComandas() {
     const tabs = [
       { key: "abrir", label: "Abrir pedido/comanda" },
@@ -5071,8 +5195,19 @@
     `;
   }
 
+  function renderAdminKitchen() {
+    return `
+      <div class="card" style="margin-bottom:0.8rem;">
+        <h3>Cozinha</h3>
+        <p class="note">Painel da cozinha integrado ao administrador. Acompanhe e atualize os pedidos sem trocar de conta.</p>
+      </div>
+      ${renderCookActive()}
+      <div style="margin-top:0.8rem;">${renderCookHistory()}</div>
+    `;
+  }
+
   function renderAdmin(user) {
-    if (uiState.adminTab === "avulsa") {
+    if (uiState.adminTab === "avulsa" || uiState.adminTab === "monitor" || uiState.adminTab === "impressao") {
       uiState.adminTab = "dashboard";
     } else if (uiState.adminTab === "apagar") {
       uiState.adminTab = "financeiro";
@@ -5082,7 +5217,7 @@
       { key: "comandas", label: "Comandas" },
       { key: "produtos", label: "Produtos" },
       { key: "funcionarios", label: "Funcionarios" },
-      { key: "monitor", label: "Monitor" },
+      { key: "cozinha", label: "Cozinha" },
       { key: "financeiro", label: "Financas" },
       { key: "caixa", label: "Fechar Caixa" }
     ];
@@ -5098,8 +5233,8 @@
       case "funcionarios":
         content = renderAdminEmployees();
         break;
-      case "monitor":
-        content = renderAdminMonitor();
+      case "cozinha":
+        content = renderAdminKitchen();
         break;
       case "financeiro":
         content = renderAdminFinance();
@@ -5160,7 +5295,7 @@
   }
 
   function renderDev(user) {
-    if (uiState.devTab === "avulsa") {
+    if (uiState.devTab === "avulsa" || uiState.devTab === "monitor" || uiState.devTab === "impressao") {
       uiState.devTab = "dashboard";
     } else if (uiState.devTab === "apagar") {
       uiState.devTab = "financeiro";
@@ -5170,7 +5305,7 @@
       { key: "comandas", label: "Comandas" },
       { key: "produtos", label: "Produtos" },
       { key: "funcionarios", label: "Funcionarios" },
-      { key: "monitor", label: "Monitor" },
+      { key: "cozinha", label: "Cozinha" },
       { key: "devices", label: "Dispositivos" },
       { key: "financeiro", label: "Financas" },
       { key: "caixa", label: "Fechar Caixa" },
@@ -5188,8 +5323,8 @@
       case "funcionarios":
         content = renderAdminEmployees();
         break;
-      case "monitor":
-        content = renderAdminMonitor();
+      case "cozinha":
+        content = renderAdminKitchen();
         break;
       case "devices":
         content = renderDevDevices();
@@ -5259,10 +5394,6 @@
               <label>Nome do cliente (opcional)</label>
               <input name="customer" placeholder="Cliente" />
             </div>
-            <div class="field">
-              <label><input name="isAvulsa" type="checkbox" /> Marcar como venda avulsa</label>
-              <div class="note">Ao marcar, a comanda e aberta como avulsa sem exigir mesa/referencia.</div>
-            </div>
             <button class="btn primary" type="submit">Criar Comanda</button>
           </form>
         </div>
@@ -5294,7 +5425,7 @@
       <div class="grid cols-2">
         <div class="card">
           <h3>${title}</h3>
-          <p class="note">Venda rapida. Itens com fluxo de cozinha (Cozinha e Ofertas dependentes) entram na fila da cozinha com as mesmas regras da comanda.</p>
+          <p class="note">Venda rapida. Itens com fluxo de cozinha (Lanche, Entradas e Ofertas dependentes) entram na fila da cozinha com as mesmas regras da comanda.</p>
           <form id="quick-sale-form" data-role="quick-sale-form" data-context="${roleContext}" class="form" style="margin-top:0.75rem;">
             <div class="grid cols-2">
               <div class="field">
@@ -5356,6 +5487,7 @@
     const flags = [];
     const isMissing = itemNeedsKitchen(item) && !item.canceled && (item.kitchenStatus || "fila") === "em_falta";
     const subtotal = parseNumber(item.qty || 0) * parseNumber(item.priceAtSale || 0);
+    const linkedSnack = item.addonForItemId ? (comanda.items || []).find((entry) => entry.id === item.addonForItemId) : null;
     if (item.canceled) flags.push('<span class="tag">Cancelado</span>');
     if (item.delivered) flags.push('<span class="tag">Entregue</span>');
     if (item.deliveryRequested) flags.push('<span class="tag">Entrega</span>');
@@ -5376,7 +5508,8 @@
     return `
       <div class="item-row ${tone ? `item-row-${tone}` : ""}">
         <div><b>${esc(item.name)}</b> x${item.qty} | ${money(item.priceAtSale)} un | ${isMissing ? `<span class="item-subtotal-missing">Subtotal nao cobrado</span>` : `Subtotal ${money(subtotal)}`}</div>
-        <div class="note">Categoria: ${esc(item.category)} | Criado em: ${formatDateTime(item.createdAt)}</div>
+        <div class="note">Categoria: ${esc(item.category)}${item.subcategory ? ` / ${esc(item.subcategory)}` : ""} | Criado em: ${formatDateTime(item.createdAt)}</div>
+        ${linkedSnack ? `<div class="note"><b>Adicional do lanche:</b> ${esc(linkedSnack.name)}</div>` : ""}
         ${item.waiterNote ? `<div class="note">Obs do pedido: ${esc(item.waiterNote)}</div>` : ""}
         ${item.deliveryRequested ? `<div class="note"><b>Entrega:</b> ${esc(item.deliveryRecipient || "-")} | ${esc(item.deliveryLocation || "-")}</div>` : ""}
         ${item.canceled ? `<div class="note">Cancelamento: ${esc(item.cancelReason || "-")} ${item.cancelNote ? `| ${esc(item.cancelNote)}` : ""}</div>` : ""}
@@ -5453,7 +5586,10 @@
           <div class="note" data-role="manual-check-note" style="display:none;">No fiado, essa confirmacao e dispensada.</div>
         </div>
         <div class="note"><b>Valor total:</b> ${money(total)}</div>
-        <button class="btn ok" type="submit">Confirmar finalizacao</button>
+        <div class="actions finalize-actions">
+          <button class="btn secondary" type="button" data-action="print-client-receipt" data-comanda-id="${comanda.id}">Gerar Nota</button>
+          <button class="btn ok" type="submit">Confirmar finalizacao</button>
+        </div>
       </form>
     `;
   }
@@ -5523,6 +5659,12 @@
                 ${CATEGORIES.map((c) => `<option value="${c}">${c}</option>`).join("")}
               </select>
             </div>
+            <div class="field" data-role="item-subcategory-box" style="display:none;">
+              <label>Tipo de lanche</label>
+              <select name="subcategory" data-role="item-subcategory">
+                ${SNACK_SUBCATEGORIES.map((subcategory) => `<option value="${subcategory}">${subcategory}</option>`).join("")}
+              </select>
+            </div>
             <div class="field">
               <label>Buscar produto</label>
               <input
@@ -5537,27 +5679,51 @@
             <label>Produto</label>
             <select name="productId" data-role="item-product"></select>
           </div>
+          <div class="field" data-role="lanche-addon-link-box" style="display:none;">
+            <label>Associar adicional ao lanche</label>
+            <select name="addonForItemId" data-role="lanche-addon-link"></select>
+          </div>
           <div class="grid cols-2">
             <div class="field">
               <label>Quantidade</label>
               <input name="qty" type="number" min="1" value="1" required />
             </div>
-            <div class="field" data-role="kitchen-note-box" style="display:none;">
-              <label>Observacao para cozinha</label>
-              <input name="waiterNote" data-role="kitchen-note-input" placeholder="Ex: sem cebola, ponto da carne, alergia..." />
+            <div class="field" data-role="customize-item-toggle-box" style="display: flex; align-items: center; margin-top: 1.25rem;">
+              <label style="display: flex; align-items: center; gap: 0.25rem; font-weight: bold; cursor: pointer;">
+                <input type="checkbox" data-role="customize-item-check" />
+                Marcar item
+              </label>
             </div>
           </div>
-          <div class="field" data-role="delivery-box" style="display:none;">
-            <label><input type="checkbox" name="isDelivery" data-role="delivery-check" /> Pedido para entrega</label>
-            <div class="grid cols-2" data-role="delivery-fields" style="display:none;">
-              <div class="field">
-                <label>Receber por</label>
-                <input name="deliveryRecipient" placeholder="Nome de quem recebe" />
-              </div>
-              <div class="field">
-                <label>Local da entrega</label>
-                <input name="deliveryLocation" placeholder="Endereco/local de entrega" />
-              </div>
+
+          <div class="grid cols-2" data-role="item-options-box" style="display:none; margin-top: 0.5rem; gap: 0.5rem;">
+            <div class="field" style="display: flex; align-items: center;">
+              <label style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer;">
+                <input type="checkbox" data-role="item-has-note-check" />
+                Possui observação
+              </label>
+            </div>
+            <div class="field" style="display: flex; align-items: center;">
+              <label style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer;">
+                <input type="checkbox" name="isDelivery" data-role="item-is-delivery-check" />
+                É para viagem
+              </label>
+            </div>
+          </div>
+
+          <div class="field" data-role="item-note-input-box" style="display:none; margin-top: 0.5rem;">
+            <label>Observação</label>
+            <input name="waiterNote" data-role="item-note-input" placeholder="Ex: sem cebola, ponto da carne, etc..." />
+          </div>
+
+          <div class="grid cols-2" data-role="item-delivery-fields-box" style="display:none; margin-top: 0.5rem; gap: 0.5rem;">
+            <div class="field">
+              <label>Quem vai receber</label>
+              <input name="deliveryRecipient" data-role="item-recipient-input" placeholder="Nome de quem recebe" />
+            </div>
+            <div class="field">
+              <label>Local de entrega</label>
+              <input name="deliveryLocation" data-role="item-location-input" placeholder="Endereço de entrega" />
             </div>
           </div>
           <div class="note" data-role="kitchen-estimate">Tempo estimado cozinha: -</div>
@@ -5573,7 +5739,6 @@
             : ""
         }
           <div class="actions draft-actions">
-            ${fiadoEditMode ? "" : `<button class="btn secondary compact-action" type="button" data-action="queue-draft-item" data-comanda-id="${comanda.id}">Selecionar</button>`}
             <button class="btn primary compact-action" type="submit">${fiadoEditMode ? "Adicionar" : draftItems.length ? "Adicionar lote" : "Adicionar"}</button>
           </div>
         </form>
@@ -5582,8 +5747,7 @@
 
         ${!fiadoEditMode && !isCollapsed
         ? `<div class="actions">
-          <button class="btn secondary" type="button" data-action="add-comanda-note" data-comanda-id="${comanda.id}">Adicionar observacao</button>
-          <button class="btn secondary" type="button" data-action="print-comanda" data-comanda-id="${comanda.id}">Ver cupom</button>
+          <button class="btn secondary" type="button" data-action="print-order-ticket" data-comanda-id="${comanda.id}">Enviar pedido</button>
           ${canDeleteComanda ? `<button class="btn danger" type="button" data-action="delete-comanda" data-comanda-id="${comanda.id}">Excluir comanda</button>` : ""}
           <button class="btn primary" type="button" data-action="toggle-finalize" data-comanda-id="${comanda.id}">${isFinalizeOpen ? "Fechar painel" : "Finalizar comanda"}</button>
         </div>`
@@ -5903,6 +6067,7 @@
                   </div>
                   <div class="kitchen-order-head-actions">
                     <span class="kitchen-order-status ${statusClass}">${esc(statusLabel)}</span>
+                    <button class="btn secondary compact-action kitchen-ticket-btn" data-action="print-order-ticket" data-comanda-id="${row.comanda.id}">Pedido</button>
                     ${canCollapseRows
               ? `<button class="btn secondary compact-action kitchen-collapse-toggle" data-action="toggle-kitchen-row-collapse" data-comanda-id="${row.comanda.id}" data-item-id="${row.item.id}">${isCollapsed ? "Expandir" : "Minimizar"}</button>`
               : ""
@@ -6173,48 +6338,74 @@
   function updateAdminProductSubmenu(form) {
     const category = form?.category?.value || "";
     const offerBox = form?.querySelector('[data-role="admin-offer-kitchen"]');
+    const lancheSubcategoryBox = form?.querySelector('[data-role="admin-lanche-subcategory"]');
     const offerNeedsKitchen = form?.offerNeedsKitchen;
     const isOffer = category === "Ofertas";
     if (offerBox) offerBox.style.display = isOffer ? "grid" : "none";
+    if (lancheSubcategoryBox) lancheSubcategoryBox.style.display = category === "Lanche" ? "grid" : "none";
     if (offerNeedsKitchen && !isOffer) {
       offerNeedsKitchen.checked = false;
     }
   }
 
   function updateDeliveryFields(form) {
-    const category = form.querySelector('[data-role="item-category"]')?.value;
-    const productId = Number(form.querySelector('[data-role="item-product"]')?.value || 0);
-    const product = state.products.find((p) => p.id === productId && p.category === category);
-    const box = form.querySelector('[data-role="delivery-box"]');
-    const fields = form.querySelector('[data-role="delivery-fields"]');
-    const check = form.querySelector('[data-role="delivery-check"]');
-    const recipient = form.querySelector('input[name="deliveryRecipient"]');
-    const location = form.querySelector('input[name="deliveryLocation"]');
-    const noteBox = form.querySelector('[data-role="kitchen-note-box"]');
-    const noteInput = form.querySelector('[data-role="kitchen-note-input"]');
-    if (!box || !fields || !check || !recipient || !location || !noteBox || !noteInput) return;
+    const customizeCheck = form.querySelector('[data-role="customize-item-check"]');
+    const optionsBox = form.querySelector('[data-role="item-options-box"]');
+    const hasNoteCheck = form.querySelector('[data-role="item-has-note-check"]');
+    const noteInputBox = form.querySelector('[data-role="item-note-input-box"]');
+    const noteInput = form.querySelector('[data-role="item-note-input"]');
+    const isDeliveryCheck = form.querySelector('[data-role="item-is-delivery-check"]');
+    const deliveryFieldsBox = form.querySelector('[data-role="item-delivery-fields-box"]');
+    const recipientInput = form.querySelector('[data-role="item-recipient-input"]');
+    const locationInput = form.querySelector('[data-role="item-location-input"]');
 
-    const isKitchen = productNeedsKitchen(product);
-    if (!isKitchen) {
-      box.style.display = "none";
-      fields.style.display = "none";
-      check.checked = false;
-      recipient.value = "";
-      location.value = "";
-      recipient.required = false;
-      location.required = false;
-      noteBox.style.display = "none";
-      noteInput.value = "";
-      noteInput.required = false;
-      return;
+    if (!customizeCheck) return;
+
+    if (customizeCheck.checked) {
+      if (optionsBox) optionsBox.style.display = "grid";
+      
+      // Note logic
+      if (hasNoteCheck && hasNoteCheck.checked) {
+        if (noteInputBox) noteInputBox.style.display = "block";
+      } else {
+        if (noteInputBox) noteInputBox.style.display = "none";
+        if (noteInput) noteInput.value = "";
+      }
+
+      // Delivery logic
+      if (isDeliveryCheck && isDeliveryCheck.checked) {
+        if (deliveryFieldsBox) deliveryFieldsBox.style.display = "grid";
+        if (recipientInput) recipientInput.required = true;
+        if (locationInput) locationInput.required = true;
+      } else {
+        if (deliveryFieldsBox) deliveryFieldsBox.style.display = "none";
+        if (recipientInput) {
+          recipientInput.required = false;
+          recipientInput.value = "";
+        }
+        if (locationInput) {
+          locationInput.required = false;
+          locationInput.value = "";
+        }
+      }
+    } else {
+      if (optionsBox) optionsBox.style.display = "none";
+      if (noteInputBox) noteInputBox.style.display = "none";
+      if (deliveryFieldsBox) deliveryFieldsBox.style.display = "none";
+
+      if (hasNoteCheck) hasNoteCheck.checked = false;
+      if (isDeliveryCheck) isDeliveryCheck.checked = false;
+
+      if (noteInput) noteInput.value = "";
+      if (recipientInput) {
+        recipientInput.required = false;
+        recipientInput.value = "";
+      }
+      if (locationInput) {
+        locationInput.required = false;
+        locationInput.value = "";
+      }
     }
-
-    box.style.display = "grid";
-    fields.style.display = check.checked ? "grid" : "none";
-    recipient.required = check.checked;
-    location.required = check.checked;
-    noteBox.style.display = "grid";
-    noteInput.required = false;
   }
 
   function normalizeSearchText(value) {
@@ -6240,21 +6431,54 @@
     const productSel = form.querySelector('[data-role="item-product"]');
     if (!categorySel || !productSel) return;
     const searchInput = form.querySelector('[data-role="item-product-search"]');
+    const subcategorySel = form.querySelector('[data-role="item-subcategory"]');
+    const subcategoryBox = form.querySelector('[data-role="item-subcategory-box"]');
+    if (subcategoryBox) subcategoryBox.style.display = categorySel.value === "Lanche" ? "grid" : "none";
     if (options.resetSearch && searchInput) {
       searchInput.value = "";
     }
     const selectedValue = String(productSel.value || "").trim();
     fillProductSelect(productSel, categorySel.value, {
       selectedValue,
-      searchTerm: searchInput ? searchInput.value : ""
+      searchTerm: searchInput ? searchInput.value : "",
+      subcategory: categorySel.value === "Lanche" ? subcategorySel?.value || "Lanches" : ""
     });
     updateKitchenEstimate(form);
     updateDeliveryFields(form);
+    updateLancheAddonLink(form);
+  }
+
+  function updateLancheAddonLink(form) {
+    const box = form?.querySelector('[data-role="lanche-addon-link-box"]');
+    const select = form?.querySelector('[data-role="lanche-addon-link"]');
+    const category = form?.querySelector('[data-role="item-category"]')?.value;
+    const productId = Number(form?.querySelector('[data-role="item-product"]')?.value || 0);
+    const comandaId = String(form?.dataset?.comandaId || "");
+    const product = state.products.find((item) => item.id === productId && item.category === category);
+    if (!box || !select) return;
+    const isAddon = product?.category === "Lanche" && product?.subcategory === "Adicionais";
+    if (!isAddon) {
+      box.style.display = "none";
+      select.required = false;
+      select.innerHTML = "";
+      return;
+    }
+    const comanda = findOpenComanda(comandaId);
+    const snackItems = (comanda?.items || []).filter(
+      (item) => !item.canceled && item.category === "Lanche" && item.subcategory === "Lanches"
+    );
+    box.style.display = "grid";
+    select.required = true;
+    select.innerHTML = snackItems.length
+      ? `<option value="">Selecione o lanche</option>${snackItems.map((item) => `<option value="${esc(item.id)}">${esc(item.name)} x${item.qty}</option>`).join("")}`
+      : `<option value="">Adicione um lanche antes do adicional</option>`;
   }
 
   function fillProductSelect(selectElement, category, options = {}) {
     if (!selectElement) return;
-    const categoryOptions = state.products.filter((p) => p.category === category);
+    const categoryOptions = state.products.filter(
+      (p) => p.category === category && (!options.subcategory || p.subcategory === options.subcategory)
+    );
     const normalizedSearch = normalizeSearchText(options.searchTerm);
     const selectedValue = String(options.selectedValue !== undefined ? options.selectedValue : selectElement.value || "").trim();
     const filteredOptions = normalizedSearch
@@ -6293,7 +6517,7 @@
     const category = form.querySelector('[data-role="quick-category"]')?.value;
     const selectElement = form.querySelector('[data-role="quick-product"]');
     if (!selectElement) return;
-    const options = state.products.filter((p) => p.category === category);
+    const options = state.products.filter((p) => p.category === category && !(category === "Lanche" && p.subcategory === "Adicionais"));
     if (!options.length) {
       selectElement.innerHTML = `<option value="">Sem produtos</option>`;
       return;
@@ -6323,7 +6547,7 @@
     const recipient = form.querySelector('input[name="deliveryRecipient"]');
     const location = form.querySelector('input[name="deliveryLocation"]');
     const note = form.querySelector('[data-role="quick-kitchen-note"]');
-    const isKitchen = selectedProduct ? productNeedsKitchen(selectedProduct) : category === "Cozinha";
+    const isKitchen = selectedProduct ? productNeedsKitchen(selectedProduct) : KITCHEN_CATEGORIES.has(category);
 
     if (note) {
       note.textContent = isKitchen
@@ -6537,10 +6761,19 @@
     const category = form.category.value;
     const productId = Number(form.productId.value || 0);
     const qty = Math.max(1, Number(form.qty.value || 1));
-    const waiterNoteRaw = String(form.waiterNote?.value || "").trim();
-    const isDeliveryRaw = Boolean(form.isDelivery?.checked);
-    const deliveryRecipient = String(form.deliveryRecipient?.value || "").trim();
-    const deliveryLocation = String(form.deliveryLocation?.value || "").trim();
+    
+    const customizeCheck = form.querySelector('[data-role="customize-item-check"]');
+    const hasNoteCheck = form.querySelector('[data-role="item-has-note-check"]');
+    const isDeliveryCheck = form.querySelector('[data-role="item-is-delivery-check"]');
+
+    const hasCustomize = customizeCheck && customizeCheck.checked;
+    const hasNote = hasCustomize && hasNoteCheck && hasNoteCheck.checked;
+    const isDelivery = hasCustomize && isDeliveryCheck && isDeliveryCheck.checked;
+
+    const waiterNoteRaw = hasNote ? String(form.waiterNote?.value || "").trim() : "";
+    const deliveryRecipient = isDelivery ? String(form.deliveryRecipient?.value || "").trim() : "";
+    const deliveryLocation = isDelivery ? String(form.deliveryLocation?.value || "").trim() : "";
+    const addonForItemId = String(form.addonForItemId?.value || "").trim();
 
     const product = state.products.find((p) => p.id === productId && p.category === category);
     if (!product) {
@@ -6550,9 +6783,16 @@
       return { error: `Produto ${product.name} esta indisponivel no cardapio.` };
     }
 
+    if (product.category === "Lanche" && product.subcategory === "Adicionais") {
+      const comanda = findOpenComanda(String(form.dataset.comandaId || ""));
+      const linkedSnack = (comanda?.items || []).find(
+        (item) => item.id === addonForItemId && !item.canceled && item.category === "Lanche" && item.subcategory === "Lanches"
+      );
+      if (!linkedSnack) return { error: "Selecione o lanche ao qual este adicional pertence." };
+    }
+
     const needsKitchen = productNeedsKitchen(product);
-    const isDelivery = needsKitchen && isDeliveryRaw;
-    if (needsKitchen && isDelivery && (!deliveryRecipient || !deliveryLocation)) {
+    if (isDelivery && (!deliveryRecipient || !deliveryLocation)) {
       return { error: "Para entrega, informe quem recebe e o local de entrega." };
     }
 
@@ -6561,11 +6801,12 @@
         category,
         productId: product.id,
         qty,
-        waiterNote: needsKitchen ? waiterNoteRaw : "",
+        waiterNote: waiterNoteRaw,
         needsKitchen,
         isDelivery,
         deliveryRecipient: isDelivery ? deliveryRecipient : "",
-        deliveryLocation: isDelivery ? deliveryLocation : ""
+        deliveryLocation: isDelivery ? deliveryLocation : "",
+        addonForItemId: addonForItemId || ""
       }
     };
   }
@@ -6614,6 +6855,7 @@
       productId: product.id,
       name: product.name,
       category: product.category,
+      subcategory: product.subcategory || "",
       qty,
       priceAtSale: parseNumber(product.price),
       costAtSale: parseNumber(product.cost || 0),
@@ -6621,6 +6863,7 @@
       requiresKitchen: Boolean(product.requiresKitchen),
       needsKitchen: Boolean(draft.needsKitchen),
       waiterNote: draft.waiterNote || "",
+      addonForItemId: draft.addonForItemId || "",
       noteType: "",
       createdAt: isoNow(),
       delivered: false,
@@ -6999,13 +7242,17 @@
     render();
   }
 
+  function removeAccents(str) {
+    return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  }
+
   function createProduct(form) {
     const actor = currentActor();
-    const name = form.name.value.trim();
+    const name = removeAccents(form.name.value.trim());
     const category = form.category.value;
-    const subcategory = category === "Bar" ? "Geral" : "";
+    const subcategory = category === "Bebidas" ? "Geral" : category === "Lanche" ? String(form.lancheSubcategory?.value || "Lanches") : "";
     const available = Boolean(form.available?.checked);
-    const requiresKitchen = category === "Cozinha" ? true : category === "Ofertas" ? Boolean(form.offerNeedsKitchen?.checked) : false;
+    const requiresKitchen = KITCHEN_CATEGORIES.has(category) ? true : category === "Ofertas" ? Boolean(form.offerNeedsKitchen?.checked) : false;
     const price = parseNumber(form.price.value);
     const stock = Math.max(0, Number(form.stock.value || 0));
     const prepTime = Math.max(0, Number(form.prepTime.value || 0));
@@ -7027,8 +7274,8 @@
     const p = state.products.find((prod) => prod.id === productId);
     if (!p) return;
 
-    const name = prompt("Nome do produto:", p.name);
-    if (name === null) return;
+    const name = removeAccents(prompt("Nome do produto:", p.name) || "");
+    if (!name) return;
     const price = prompt("Preco:", String(p.price));
     if (price === null) return;
     const stock = prompt("Estoque:", String(p.stock));
@@ -7040,8 +7287,8 @@
     const availablePrompt = prompt("Disponivel no cardapio? (sim/nao):", p.available === false ? "nao" : "sim");
     if (availablePrompt === null) return;
     const available = !["nao", "n", "0", "false"].includes(availablePrompt.trim().toLowerCase());
-    p.subcategory = p.category === "Bar" ? "Geral" : "";
-    if (p.category === "Cozinha") {
+    p.subcategory = p.category === "Bebidas" ? "Geral" : "";
+    if (KITCHEN_CATEGORIES.has(p.category)) {
       p.requiresKitchen = true;
     } else if (p.category === "Ofertas") {
       const offerKitchenPrompt = prompt("Oferta depende da cozinha? (sim/nao):", p.requiresKitchen ? "sim" : "nao");
@@ -7610,9 +7857,8 @@
 
   function createComanda(form) {
     const actor = currentActor();
-    const isAvulsa = formCheckboxChecked(form, "isAvulsa", false);
     const tableInput = form.table.value.trim();
-    const table = isAvulsa ? "Venda Avulsa" : tableInput;
+    const table = tableInput;
     const customer = form.customer.value.trim();
     const createdAt = isoNow();
 
@@ -7634,13 +7880,13 @@
       createdAt,
       createdBy: actor.id,
       status: "aberta",
-      notes: isAvulsa ? ["Comanda marcada como venda avulsa na abertura."] : [],
+      notes: [],
       items: [],
       events: [],
       payment: null,
       pixCodeDraft: null,
       kitchenAlertUnread: false,
-      isAvulsa: Boolean(isAvulsa)
+      isAvulsa: false
     };
 
     state.openComandas.push(comanda);
@@ -7648,7 +7894,7 @@
     appendComandaEvent(comanda, {
       actor,
       type: "comanda_aberta",
-      detail: `Comanda aberta na ${table}${customer ? ` para ${customer}` : ""}${isAvulsa ? " | marcada como avulsa" : ""}.`
+      detail: `Comanda aberta na ${table}${customer ? ` para ${customer}` : ""}.`
     });
 
     uiState.waiterTab = "abrir";
@@ -7788,6 +8034,7 @@
         uiState.waiterActiveComandaId = saleComanda.id;
       }
       saveState();
+      publishKitchenOrderUpsert(saleComanda, [item], actor, "Venda avulsa cozinha");
       if (AUTO_OPEN_KITCHEN_PREVIEW_ON_ADD) {
         printKitchenTicket(saleComanda, [item], actor, { reason: "Venda avulsa cozinha" });
       }
@@ -7903,22 +8150,32 @@
       return;
     }
 
+    const createdItems = [];
     for (const draft of draftsToAdd) {
-      appendDraftItemToComanda(comanda, actor, draft);
+      const createdItem = appendDraftItemToComanda(comanda, actor, draft);
+      if (createdItem) createdItems.push(createdItem);
     }
 
     clearWaiterDraftItems(comandaId);
     form.qty.value = "1";
-    form.waiterNote.value = "";
-    if (form.isDelivery) form.isDelivery.checked = false;
-    if (form.deliveryRecipient) form.deliveryRecipient.value = "";
-    if (form.deliveryLocation) form.deliveryLocation.value = "";
+    const customizeCheck = form.querySelector('[data-role="customize-item-check"]');
+    const hasNoteCheck = form.querySelector('[data-role="item-has-note-check"]');
+    const isDeliveryCheck = form.querySelector('[data-role="item-is-delivery-check"]');
+    const noteInput = form.querySelector('[data-role="item-note-input"]');
+    const recipientInput = form.querySelector('[data-role="item-recipient-input"]');
+    const locationInput = form.querySelector('[data-role="item-location-input"]');
+    if (customizeCheck) customizeCheck.checked = false;
+    if (hasNoteCheck) hasNoteCheck.checked = false;
+    if (isDeliveryCheck) isDeliveryCheck.checked = false;
+    if (noteInput) noteInput.value = "";
+    if (recipientInput) recipientInput.value = "";
+    if (locationInput) locationInput.value = "";
+    updateDeliveryFields(form);
 
     saveState();
+    publishKitchenOrderUpsert(comanda, createdItems, actor, "Novo pedido");
     if (AUTO_OPEN_KITCHEN_PREVIEW_ON_ADD) {
-      const kitchenItemsToPreview = draftsToAdd
-        .map((draft, index) => comanda.items?.[comanda.items.length - draftsToAdd.length + index])
-        .filter((item) => item && itemNeedsKitchen(item));
+      const kitchenItemsToPreview = createdItems.filter((item) => item && itemNeedsKitchen(item));
       if (kitchenItemsToPreview.length) {
         printKitchenTicket(comanda, kitchenItemsToPreview, actor, { reason: "Novo pedido" });
       }
@@ -8001,12 +8258,24 @@
     syncComandaFiadoSplit(comanda, pendingPayable);
 
     form.qty.value = "1";
-    if (form.waiterNote) form.waiterNote.value = "";
-    if (form.isDelivery) form.isDelivery.checked = false;
-    if (form.deliveryRecipient) form.deliveryRecipient.value = "";
-    if (form.deliveryLocation) form.deliveryLocation.value = "";
+    const customizeCheck = form.querySelector('[data-role="customize-item-check"]');
+    const hasNoteCheck = form.querySelector('[data-role="item-has-note-check"]');
+    const isDeliveryCheck = form.querySelector('[data-role="item-is-delivery-check"]');
+    const noteInput = form.querySelector('[data-role="item-note-input"]');
+    const recipientInput = form.querySelector('[data-role="item-recipient-input"]');
+    const locationInput = form.querySelector('[data-role="item-location-input"]');
+    if (customizeCheck) customizeCheck.checked = false;
+    if (hasNoteCheck) hasNoteCheck.checked = false;
+    if (isDeliveryCheck) isDeliveryCheck.checked = false;
+    if (noteInput) noteInput.value = "";
+    if (recipientInput) recipientInput.value = "";
+    if (locationInput) locationInput.value = "";
+    updateDeliveryFields(form);
 
     saveState();
+    if (isComandaInOpenList(comanda.id)) {
+      publishKitchenOrderUpsert(comanda, [createdItem], actor, "Item adicionado");
+    }
     render();
   }
 
@@ -8608,6 +8877,9 @@
     }
 
     saveState();
+    if (isOpenComanda) {
+      publishKitchenOrderUpsert(comanda, [createdItem], actor, "Item adicionado");
+    }
     render();
   }
 
@@ -9027,6 +9299,10 @@
 
     saveState();
     render();
+    const shouldPrint = confirm("Deseja imprimir a nota do cliente agora?");
+    if (shouldPrint) {
+      void printComanda(comanda.id, { isClientReceipt: true });
+    }
   }
 
   function toggleFinalizeView(select) {
@@ -9126,24 +9402,39 @@
     await window.qz.websocket.connect({ retries: 2, delay: 1 });
   }
 
-  async function resolveKitchenPrinterName() {
-    const preferred = String(uiState.printerPrefs?.kitchenPrinterName || "").trim();
+  async function resolvePrinterName(preferredName = "") {
+    const preferred = String(preferredName || "").trim();
     if (preferred) return preferred;
     return (await window.qz.printers.getDefault()) || "";
   }
 
-  async function printKitchenTicketViaQz(html, comandaId = "") {
+  async function printHtmlViaQz(html, options = {}) {
     await ensureQzConnected();
-    const printerName = await resolveKitchenPrinterName();
+    const printerName = await resolvePrinterName(options.printerName);
     if (!printerName) {
-      throw new Error("Nenhuma impressora de cozinha configurada/padrao.");
+      throw new Error("Nenhuma impressora configurada ou definida como padrao no Windows.");
     }
     const config = window.qz.configs.create(printerName, {
       copies: 1,
-      jobName: `cozinha-${String(comandaId || "pedido")}`
+      jobName: String(options.jobName || "cupom"),
+      colorType: "blackwhite"
     });
     const data = [{ type: "pixel", format: "html", flavor: "plain", data: html }];
     await window.qz.print(config, data);
+  }
+
+  async function printKitchenTicketViaQz(html, comandaId = "") {
+    return printHtmlViaQz(html, {
+      printerName: uiState.printerPrefs?.kitchenPrinterName,
+      jobName: `cozinha-${String(comandaId || "pedido")}`
+    });
+  }
+
+  async function printReceiptViaQz(html, receiptId = "") {
+    return printHtmlViaQz(html, {
+      printerName: uiState.printerPrefs?.receiptPrinterName,
+      jobName: `cupom-${String(receiptId || "venda")}`
+    });
   }
 
   function setKitchenDirectPrintEnabled(enabled) {
@@ -9174,6 +9465,58 @@
         : "Impressora da cozinha limpa. Sera usada a impressora padrao do computador."
     );
     render();
+  }
+
+  function saveReceiptPrinterConfigFromUi() {
+    const actor = currentActor();
+    if (!isAdminOrDev(actor)) {
+      alert("Somente administrador pode configurar a impressora de cupom.");
+      return;
+    }
+    const printerName = String(document.querySelector('[data-role="receipt-printer-name"]')?.value || "").trim();
+    const paperWidthMm = Number(document.querySelector('[data-role="receipt-paper-width"]')?.value || DEFAULT_RECEIPT_PAPER_WIDTH_MM);
+    const directEnabled = Boolean(document.querySelector('[data-role="receipt-direct-enabled"]')?.checked);
+    uiState.printerPrefs = normalizePrinterPrefs({
+      ...uiState.printerPrefs,
+      receiptDirectEnabled: directEnabled,
+      receiptPrinterName: printerName,
+      receiptPaperWidthMm: paperWidthMm
+    });
+    persistPrinterPrefs();
+    alert(`Configuracao salva. Destino: ${printerName || "impressora padrao do Windows"}; papel: ${uiState.printerPrefs.receiptPaperWidthMm} mm.`);
+    render();
+  }
+
+  function buildReceiptTestHtml() {
+    return buildThermalReceiptHtml({
+      title: "TESTE DE IMPRESSAO",
+      lines: ["MTP-II conectada pelo Windows", "Supabase + impressao local", `Gerado: ${formatDateTime(isoNow())}`],
+      footer: "Este nao e um documento fiscal."
+    });
+  }
+
+  async function printReceiptTest() {
+    try {
+      await printReceiptViaQz(buildReceiptTestHtml(), "teste");
+      alert("Teste enviado para a impressora.");
+    } catch (err) {
+      alert(`Nao foi possivel imprimir o teste: ${String(err?.message || err)}\n\nConfira se a MTP-II esta pareada, configurada no Windows e se o QZ Tray esta aberto.`);
+    }
+  }
+
+  function buildThermalReceiptHtml({ title, lines = [], footer = "" }) {
+    const width = normalizePrinterPrefs(uiState.printerPrefs).receiptPaperWidthMm;
+    const renderedLines = lines.map((line) => `<p>${line}</p>`).join("");
+    return `
+      <html><head><meta charset="utf-8"><style>
+        @page { size: ${width}mm auto; margin: 0; }
+        body { width: ${width}mm; margin: 0; padding: 3mm; box-sizing: border-box; font-family: Arial, sans-serif; color: #000; }
+        .receipt { width: 100%; font-size: 11px; line-height: 1.25; }
+        h3 { margin: 0 0 7px; font-size: 14px; text-align: center; }
+        p { margin: 3px 0; overflow-wrap: anywhere; }
+        hr { border: 0; border-top: 1px dashed #000; margin: 7px 0; }
+        .footer { font-size: 9px; text-align: center; }
+      </style></head><body><div class="receipt"><h3>${esc(title)}</h3><hr>${renderedLines}<hr><p class="footer">${esc(footer)}</p></div></body></html>`;
   }
 
   function printKitchenTicket(comanda, items, actor, options = {}) {
@@ -9229,63 +9572,316 @@
             <hr>
             ${printableItems}
             <hr>
-            <p class="meta">${PRINT_PIPELINE_ENABLED ? "Cupom de cozinha - impressao automatica" : "Cupom de cozinha - visualizacao simples no navegador/PWA"}</p>
+            <p class="meta">${uiState.printerPrefs?.kitchenDirectEnabled ? "Cupom de cozinha - envio direto configurado" : "Cupom de cozinha - visualizacao simples no navegador/PWA"}</p>
           </div>
         </body>
       </html>
     `;
 
+    if (uiState.printerPrefs?.kitchenDirectEnabled) {
+      void printKitchenTicketViaQz(html, comanda.id).catch((err) => {
+        alert(`Falha na impressao da cozinha: ${String(err?.message || err)}`);
+      });
+      return;
+    }
     openReceiptPopup(html, "Permita pop-up para abrir a visualizacao do cupom da cozinha.", "width=420,height=760", {
       previewTitle: `Cupom da cozinha ${displayComandaId(comanda.id)}`,
       previewSubtitle: "Modo visualizacao simples (impressao desativada)"
     });
   }
 
-  function printComanda(comandaId) {
+  function isAndroidDevice() {
+    return /Android/i.test(String(navigator.userAgent || ""));
+  }
+
+  function imprimirCupomIntent(textoCupom) {
+    const textoSeguro = String(textoCupom || "").replace(/\u0000/g, "");
+    const urlRawBT =
+      "intent:" + encodeURIComponent(textoSeguro) +
+      "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;";
+    window.location.href = urlRawBT;
+  }
+
+  function buildComandaReceiptText(comanda, options = {}) {
+    const actor = currentActor() || { name: "N/A" };
+    const isOrderTicket = options.isOrderTicket;
+    
+    // Find delivery details from items
+    const deliveryItem = (comanda?.items || []).find((i) => i && i.deliveryRequested && !i.canceled);
+    const hasDelivery = !!deliveryItem;
+    const recipient = deliveryItem?.deliveryRecipient || "";
+    const location = deliveryItem?.deliveryLocation || "";
+    const notesText = (comanda?.notes || []).join(" | ");
+
+    if (isOrderTicket) {
+      const itemsText = (comanda?.items || [])
+        .filter((i) => i && !i.canceled)
+        .map((item) => {
+          const obs = item.waiterNote ? `  * OBS COZINHA: ${item.waiterNote}\n` : "";
+          const del = item.deliveryRequested ? `  * PARA VIAGEM: ${item.deliveryRecipient} - ${item.deliveryLocation}\n` : "";
+          return `${String(item.name)} x${parseNumber(item.qty)}\n${obs}${del}`;
+        })
+        .join("") || "Sem itens\n";
+
+      const ticketLines = [
+        `=== ENVIO DE PEDIDO ===`,
+        `${ESTABLISHMENT_NAME}`,
+        `Pedido: ${displayComandaId(comanda?.id)}`,
+        `Garçom: ${actor.name || "-"}`,
+        `Mesa/Ref: ${String(comanda?.table || "-")}`,
+        `Cliente: ${String(comanda?.customer || "-")}`,
+        "------------------------------",
+        hasDelivery ? `ENTREGA: SIM\nRecebe: ${recipient}\nOnde: ${location}` : "Entrega: No local",
+        "------------------------------",
+        notesText ? `OBSERVAÇÕES DA COMANDA:\n${notesText}\n------------------------------` : "",
+        `ITENS DO PEDIDO:\n${itemsText}`,
+        "------------------------------",
+        `Gerado em: ${formatDateTime(isoNow())}`,
+        "\n\n"
+      ];
+
+      return ticketLines.filter(Boolean).join("\n");
+    } else {
+      // Client receipt
+      const itemsText = (comanda?.items || [])
+        .filter((i) => i && !i.canceled && itemCountsForTotal(i))
+        .map((item) => {
+          const unit = parseNumber(item.priceAtSale || 0);
+          const qty = parseNumber(item.qty || 0);
+          const obs = item.waiterNote ? `  * Obs: ${item.waiterNote}\n` : "";
+          const del = item.deliveryRequested ? `  * Para Viagem: ${item.deliveryRecipient} - ${item.deliveryLocation}\n` : "";
+          return `${String(item.name)} x${qty}  ${money(unit * qty)}\n${obs}${del}`.trim();
+        })
+        .join("\n") || "Sem itens";
+
+      const receiptLines = [
+        `=== CUPOM DO CLIENTE ===`,
+        `${ESTABLISHMENT_NAME}`,
+        `Mesa: ${String(comanda?.table || "-")}`,
+        `Cliente: ${String(comanda?.customer || "-")}`,
+        `Atendido por: ${actor.name || "-"}`,
+        hasDelivery ? `Entrega para: ${recipient}\nEndereço: ${location}` : "Entrega: No local",
+        notesText ? `Observações: ${notesText}` : "",
+        "------------------------------",
+        itemsText,
+        "------------------------------",
+        `TOTAL: ${money(comandaTotal(comanda || {}))}`,
+        `Pagamento: ${comandaPaymentText(comanda || {}, { includeAmount: true, totalFallback: comandaTotal(comanda || {}) })}`,
+        `Conferência de consumo. Obrigado!`,
+        `Gerado em: ${formatDateTime(isoNow())}`,
+        "\n\n"
+      ];
+
+      return receiptLines.filter(Boolean).join("\n");
+    }
+  }
+
+  async function printComanda(comandaId, options = {}) {
     const comanda = findAnyComandaForActor(comandaId, currentActor());
     if (!comanda) return;
 
-    const lines = (comanda.items || [])
-      .map((i) => `${i.name} x${i.qty}  ${money(parseNumber(i.priceAtSale || 0))}${i.canceled ? " (cancelado)" : ""}`)
-      .join("<br>");
+    const actor = currentActor() || { name: "Garçom", role: "waiter" };
+    const isOrderTicket = options.isOrderTicket; // Check if we want the kitchen order ticket
 
-    const html = `
-      <html>
-        <head>
-          <title>Cupom ${esc(displayComandaId(comanda.id))}</title>
-          <style>
-            body { font-family: monospace; margin: 0; padding: 12px; }
-            .receipt { width: 80mm; margin: 0 auto; }
-            h3 { margin: 0 0 8px; }
-            p { margin: 4px 0; }
-            hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
-            .center { text-align: center; }
-          </style>
-        </head>
-        <body>
-          <div class="receipt">
-            <p class="center"><b>${esc(ESTABLISHMENT_NAME)}</b></p>
-            <h3>Comanda ${esc(displayComandaId(comanda.id))}</h3>
-            <p>Mesa: ${esc(comanda.table)}</p>
-            <p>Cliente: ${esc(comanda.customer || "-")}</p>
-            <p>Aberta: ${esc(formatDateTime(comanda.createdAt))}</p>
-            <hr>
-            <p>${lines || "Sem itens"}</p>
-            <hr>
-            <p>Total: <b>${money(comandaTotal(comanda))}</b></p>
-            <p>Pagamento: ${esc(comandaPaymentText(comanda, { includeAmount: true, totalFallback: comandaTotal(comanda) }))}</p>
-            <p>Observacoes: ${(comanda.notes || []).map((n) => esc(n)).join(" | ") || "-"}</p>
-            <hr>
-            <p>${PRINT_PIPELINE_ENABLED ? "Pronto para impressora de cupom." : "Visualizacao simples no navegador/PWA."}</p>
-          </div>
-        </body>
-      </html>
-    `;
+    // Extract delivery details
+    const deliveryItem = (comanda.items || []).find((i) => i && i.deliveryRequested && !i.canceled);
+    const hasDelivery = !!deliveryItem;
+    const recipient = deliveryItem?.deliveryRecipient || "";
+    const location = deliveryItem?.deliveryLocation || "";
+    const comandaNotes = (comanda.notes || []).map((n) => esc(n)).join(" | ");
 
-    openReceiptPopup(html, "Permita pop-up para abrir a visualizacao do cupom.", "width=420,height=760", {
-      previewTitle: `Cupom da comanda ${displayComandaId(comanda.id)}`,
-      previewSubtitle: "Modo visualizacao simples (impressao desativada)"
+    let html = "";
+    const paperWidthMm = normalizePrinterPrefs(uiState.printerPrefs).receiptPaperWidthMm;
+
+    if (isOrderTicket) {
+      // 1. KITCHEN / ORDER TICKET (Pedido)
+      const rows = (comanda.items || [])
+        .filter((i) => i && !i.canceled)
+        .map((i) => {
+          const qty = parseNumber(i.qty || 0);
+          const obs = i.waiterNote ? `<div class="item-obs">-> OBS COZINHA: <b>${esc(i.waiterNote)}</b></div>` : "";
+          const del = i.deliveryRequested ? `<div class="item-obs">-> PARA VIAGEM: <b>${esc(i.deliveryRecipient)}</b> @ <b>${esc(i.deliveryLocation)}</b></div>` : "";
+          return `
+            <tr>
+              <td>
+                <b>${esc(i.name)}</b>
+                ${obs}
+                ${del}
+              </td>
+              <td class="qty-cell"><b>${qty}</b></td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      html = `
+        <html>
+          <head>
+            <title>Envio de Pedido ${esc(displayComandaId(comanda.id))}</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { font-family: Arial, sans-serif; margin: 0; padding: 12px; color: #000; background: #fff; }
+              @page { size: ${paperWidthMm}mm auto; margin: 0; }
+              .receipt { width: min(100%, ${paperWidthMm}mm); margin: 0 auto; padding: 3mm; border: 2px dashed #000; }
+              h2, h3, p { margin: 0; }
+              h2 { font-size: 14px; text-align: center; font-weight: bold; }
+              h3 { font-size: 16px; text-align: center; margin-top: 5px; font-weight: bold; text-transform: uppercase; border: 1px solid #000; padding: 4px; }
+              p { margin-top: 4px; font-size: 11px; }
+              .delivery-box { border: 1px dashed #000; padding: 6px; margin-top: 6px; font-size: 11px; background: #f9f9f9; }
+              table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+              th, td { border-bottom: 1px dashed #000; padding: 6px 3px; text-align: left; vertical-align: top; }
+              th { font-size: 9px; text-transform: uppercase; }
+              .qty-cell { text-align: right; font-size: 14px; }
+              .item-obs { margin-top: 3px; font-size: 10px; color: #000; padding-left: 5px; }
+              .footer { margin-top: 8px; text-align: center; font-size: 9px; }
+            </style>
+          </head>
+          <body>
+            <div class="receipt">
+              <h2>${esc(ESTABLISHMENT_NAME)}</h2>
+              <h3>*** ENVIO DE PEDIDO ***</h3>
+              <p><b>Mesa/Referência:</b> ${esc(comanda.table || "-")}</p>
+              <p><b>Pedido:</b> ${esc(displayComandaId(comanda.id))}</p>
+              <p><b>Garçom:</b> ${esc(actor.name || "-")}</p>
+              <p><b>Data:</b> ${esc(formatDateTime(isoNow()))}</p>
+              
+              ${hasDelivery ? `
+                <div class="delivery-box">
+                  <strong>* PEDIDO PARA ENTREGA *</strong><br>
+                  <b>Quem recebe:</b> ${esc(recipient)}<br>
+                  <b>Onde recebe:</b> ${esc(location)}
+                </div>
+              ` : `
+                <p><b>Entrega:</b> No local</p>
+              `}
+
+              ${comandaNotes ? `
+                <div style="border: 1px dashed #000; padding: 6px; margin-top: 6px; font-size: 11px; background: #f9f9f9;">
+                  <strong>Observações da Comanda:</strong><br>
+                  ${comandaNotes}
+                </div>
+              ` : ""}
+
+              <table>
+                <thead><tr><th>Item</th><th style="text-align: right;">Qtd</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="2">Sem itens</td></tr>`}</tbody>
+              </table>
+              <div class="footer">Cupom interno de produção e controle.</div>
+            </div>
+          </body>
+        </html>
+      `;
+    } else {
+      // 2. CLIENT RECEIPT (Gerar Nota) - More simplified, clearly marked for client
+      const rows = (comanda.items || [])
+        .filter((i) => i && !i.canceled && itemCountsForTotal(i))
+        .map((i) => {
+          const qty = parseNumber(i.qty || 0);
+          const unit = parseNumber(i.priceAtSale || 0);
+          const obs = i.waiterNote ? `<small style="display:block;">Obs: ${esc(i.waiterNote)}</small>` : "";
+          const del = i.deliveryRequested ? `<small style="display:block;">Para Viagem: ${esc(i.deliveryRecipient)} - ${esc(i.deliveryLocation)}</small>` : "";
+          return `
+            <tr>
+              <td>
+                <b>${esc(i.name)}</b>
+                ${obs}
+                ${del}
+              </td>
+              <td>${qty}</td>
+              <td>${esc(money(unit))}</td>
+              <td><b>${money(qty * unit)}</b></td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      html = `
+        <html>
+          <head>
+            <title>Cupom Cliente ${esc(displayComandaId(comanda.id))}</title>
+            <style>
+              * { box-sizing: border-box; }
+              body { font-family: Arial, sans-serif; margin: 0; padding: 12px; color: #000; background: #fff; }
+              @page { size: ${paperWidthMm}mm auto; margin: 0; }
+              .receipt { width: min(100%, ${paperWidthMm}mm); margin: 0 auto; padding: 3mm; border: 1px solid #ccc; border-radius: 6px; }
+              h2, h3, p { margin: 0; }
+              h2 { font-size: 15px; text-align: center; }
+              h3 { margin-top: 5px; font-size: 14px; text-align: center; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 4px; }
+              p { margin-top: 4px; font-size: 11px; }
+              .delivery-info { margin-top: 4px; padding: 4px; border: 1px solid #eee; font-size: 11px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px; }
+              th, td { border-bottom: 1px solid #eee; padding: 5px 2px; text-align: left; vertical-align: top; }
+              th { font-size: 9px; text-transform: uppercase; font-weight: bold; }
+              td:nth-child(2), td:nth-child(3), td:nth-child(4), th:nth-child(2), th:nth-child(3), th:nth-child(4) { text-align: right; }
+              .total { margin-top: 8px; padding: 6px; border-radius: 4px; background: #f4f4f5; font-size: 14px; text-align: center; font-weight: bold; }
+              .center { text-align: center; }
+              .footer-msg { margin-top: 8px; text-align: center; font-size: 10px; font-weight: bold; }
+            </style>
+          </head>
+          <body>
+            <div class="receipt">
+              <h2>${esc(ESTABLISHMENT_NAME)}</h2>
+              <h3>CUPOM DO CLIENTE</h3>
+              <p><b>Conta:</b> ${esc(displayComandaId(comanda.id))}</p>
+              <p><b>Mesa/Referência:</b> ${esc(comanda.table || "-")}</p>
+              <p><b>Atendido por:</b> ${esc(actor.name || "-")}</p>
+              <p><b>Abertura:</b> ${esc(formatDateTime(comanda.createdAt))}</p>
+              
+              ${hasDelivery ? `
+                <div class="delivery-info">
+                  <strong>* Entrega Solicitada *</strong><br>
+                  <b>Cliente:</b> ${esc(recipient)}<br>
+                  <b>Endereço:</b> ${esc(location)}
+                </div>
+              ` : `
+                <p><b>Cliente:</b> ${esc(comanda.customer || "-")}</p>
+                <p><b>Entrega:</b> No local</p>
+              `}
+
+              ${comandaNotes ? `
+                <div class="delivery-info">
+                  <strong>Observações:</strong><br>
+                  ${comandaNotes}
+                </div>
+              ` : ""}
+
+              <table>
+                <thead><tr><th>Item</th><th>Qtd</th><th>Un.</th><th>Total</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="4">Sem itens</td></tr>`}</tbody>
+              </table>
+              <div class="total">Valor Total: ${money(comandaTotal(comanda))}</div>
+              <p><b>Forma de Pagamento:</b> ${esc(comandaPaymentText(comanda, { includeAmount: true, totalFallback: comandaTotal(comanda) }))}</p>
+              <div class="footer-msg">Obrigado pela preferência! Volte sempre!</div>
+              <p class="center" style="font-size: 8px; margin-top: 8px; color: #666;">Documento sem valor fiscal para conferência de consumo.</p>
+            </div>
+          </body>
+        </html>
+      `;
+    }
+
+    const receiptText = buildComandaReceiptText(comanda, { isOrderTicket });
+
+    if (isAndroidDevice()) {
+      imprimirCupomIntent(receiptText);
+      return true;
+    }
+
+    if (uiState.printerPrefs?.receiptDirectEnabled) {
+      try {
+        await printReceiptViaQz(html, comanda.id);
+      } catch (err) {
+        const message = `Falha ao imprimir o pedido: ${String(err?.message || err)}\n\nConfira a MTP-II e o QZ Tray nesta maquina.`;
+        if (!options.silent) alert(message);
+        else console.warn(message);
+      }
+      return true;
+    }
+    if (options.silent) return;
+    openReceiptPopup(html, "Permita pop-up para abrir o pedido.", "width=430,height=820", {
+      previewTitle: `Pedido ${displayComandaId(comanda.id)}`,
+      previewSubtitle: "Nota de consumo para conferencia do cliente"
     });
+    return true;
   }
 
   function closeCash(form) {
@@ -9609,6 +10205,16 @@
         return;
       }
 
+      if (action === "save-receipt-printer-config") {
+        saveReceiptPrinterConfigFromUi();
+        return;
+      }
+
+      if (action === "print-receipt-test") {
+        await printReceiptTest();
+        return;
+      }
+
       if (action === "deliver-item") {
         deliverItem(button.dataset.comandaId, button.dataset.itemId);
         return;
@@ -9672,7 +10278,17 @@
       }
 
       if (action === "print-comanda") {
-        printComanda(button.dataset.comandaId);
+        await printComanda(button.dataset.comandaId);
+        return;
+      }
+
+      if (action === "print-order-ticket") {
+        await printComanda(button.dataset.comandaId, { isOrderTicket: true });
+        return;
+      }
+
+      if (action === "print-client-receipt") {
+        await printComanda(button.dataset.comandaId, { isClientReceipt: true });
         return;
       }
 
@@ -9813,7 +10429,7 @@
     try {
       const target = event.target;
 
-      if (target.matches('[data-role="item-category"]')) {
+      if (target.matches('[data-role="item-category"], [data-role="item-subcategory"]')) {
         const form = target.closest('form[data-role="add-item-form"], form[data-role="fiado-add-item-form"]');
         if (!form) return;
         refreshComandaProductSelect(form, { resetSearch: true });
@@ -9826,12 +10442,13 @@
           updateKitchenEstimate(form);
           if (target.matches('[data-role="item-product"]')) {
             updateDeliveryFields(form);
+            updateLancheAddonLink(form);
           }
         }
         return;
       }
 
-      if (target.matches('[data-role="delivery-check"]')) {
+      if (target.matches('[data-role="delivery-check"], [data-role="customize-item-check"], [data-role="item-has-note-check"], [data-role="item-is-delivery-check"]')) {
         const form = target.closest('form[data-role="add-item-form"], form[data-role="fiado-add-item-form"]');
         if (form) updateDeliveryFields(form);
         return;

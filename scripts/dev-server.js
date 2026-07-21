@@ -1,5 +1,6 @@
 const http = require("http");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const HOST = "0.0.0.0";
@@ -61,5 +62,11 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
+  const localAddresses = Object.values(os.networkInterfaces())
+    .flat()
+    .filter((network) => network && network.family === "IPv4" && !network.internal)
+    .map((network) => `http://${network.address}:${PORT}`);
+
   console.log(`Dev server rodando em http://localhost:${PORT}`);
+  localAddresses.forEach((address) => console.log(`Disponível na rede local: ${address}`));
 });

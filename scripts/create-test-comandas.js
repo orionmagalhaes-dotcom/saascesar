@@ -17,7 +17,7 @@ function isoNow() {
 
 function productNeedsKitchen(product) {
   if (!product) return false;
-  if (product.category === "Cozinha") return true;
+  if (["Lanche", "Entradas"].includes(product.category)) return true;
   return product.category === "Ofertas" && Boolean(product.requiresKitchen);
 }
 

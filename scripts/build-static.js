@@ -18,8 +18,25 @@ const files = [
   "_headers"
 ];
 
-fs.rmSync(dist, { recursive: true, force: true });
-fs.mkdirSync(dist, { recursive: true });
+function ensureDistReady() {
+  if (!fs.existsSync(dist)) {
+    fs.mkdirSync(dist, { recursive: true });
+    return;
+  }
+
+  try {
+    fs.rmSync(dist, { recursive: true, force: true });
+    fs.mkdirSync(dist, { recursive: true });
+  } catch (error) {
+    if (error && (error.code === "EPERM" || error.code === "EACCES")) {
+      console.warn("[build] Não foi possível limpar dist; continuando com os arquivos existentes.");
+      return;
+    }
+    throw error;
+  }
+}
+
+ensureDistReady();
 
 for (const file of files) {
   const src = path.join(root, file);
