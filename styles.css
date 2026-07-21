@@ -1458,10 +1458,16 @@ th {
 }
 
 .waiter-ready-item {
-  border: 1px solid #2f4f79;
+  border: 1px solid rgba(47, 79, 121, 0.55);
   border-radius: 10px;
-  background: #101e32;
+  background: #131f38;
+  color: #f8fafc;
   padding: 0.5rem 0.58rem;
+}
+
+.waiter-ready-item b,
+.waiter-ready-item strong {
+  color: #ffffff;
 }
 
 .waiter-ready-item.status-entregue {
@@ -1470,18 +1476,29 @@ th {
 }
 
 .waiter-ready-item.status-cozinhando {
-  border-color: #8b6f1f;
-  background: #2f2612;
+  border-color: #a57a26;
+  background: #3a2f18;
 }
 
 .waiter-ready-item.status-em_falta {
-  border-color: #8b2f3b;
-  background: #38181c;
+  border-color: #b14a57;
+  background: #4a1f28;
 }
 
 .waiter-ready-item.status-fila {
-  border-color: #345679;
-  background: #10263d;
+  border-color: #5a7db1;
+  background: #153358;
+}
+
+.waiter-ready-modal,
+.waiter-ready-modal h3,
+.waiter-ready-modal .note,
+.waiter-ready-item .note {
+  color: #e5e7eb;
+}
+
+.waiter-ready-item .note {
+  color: #d2dbe8;
 }
 
 .kitchen-alert-meta {

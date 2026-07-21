@@ -22,7 +22,7 @@
   const EDUARDO_RECOVERY_MARKER_KEY = "eduardo_restore_applied_v1";
   const ACCESS_CODE_WAITER_PREFIX = "Garcom Codigo";
   const SYSTEM_TEST_MARKERS = Object.freeze(["teste", "test", "mock", "pixteste", "cupom de teste"]);
-  const ESTABLISHMENT_NAME = "POPEYE HAMUBURGUERIA ARTESANAL";
+  const ESTABLISHMENT_NAME = "POPEYE HAMBURGUERIA ARTESANAL";
   const CATEGORIES = ["Bebidas", "Lanche", "Entradas", "Ofertas"];
   const BEVERAGE_SUBCATEGORIES = ["Geral"];
   const SNACK_SUBCATEGORIES = ["Lanches", "Adicionais"];
@@ -4306,7 +4306,7 @@
       perdas: totals.returnedValue,
       lucroLiquido: summary.total - totals.soldCost - totals.returnedValue
     };
-    return `<html><head><title>Extrato ${esc(cashId)}</title><style>@page{size:A4;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Arial,sans-serif;color:#12253f;background:#f4f7fb}.report{max-width:1100px;margin:0 auto;padding:20px}.card,.section,.header{background:#fff;border:1px solid #dbe4f0;border-radius:12px}.header{padding:16px}.header h1{margin:0;font-size:20px}.header p{margin:6px 0 0;font-size:12px;color:#556a86}.summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-top:12px}.card{padding:10px}.k{font-size:10px;text-transform:uppercase;color:#667a96}.v{margin-top:6px;font-size:17px;font-weight:700}.section{padding:14px;margin-top:12px}.section h2{margin:0 0 10px;font-size:15px}.note{margin:0 0 10px;font-size:11px;color:#667a96}.two{display:grid;grid-template-columns:1.4fr 1fr;gap:12px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 6px;border-bottom:1px solid #e7eef7;text-align:left;vertical-align:top}th{font-size:10px;text-transform:uppercase;color:#5d6f88}.right{text-align:right}.center{text-align:center}.acc{border:1px solid #dbe4f0;border-radius:10px;margin-bottom:8px;overflow:hidden}.acc summary{display:flex;justify-content:space-between;padding:10px 12px;background:#f5f9ff;list-style:none;font-size:12px}.acc summary::-webkit-details-marker{display:none}@media(max-width:900px){.summary{grid-template-columns:repeat(2,minmax(0,1fr))}.two{grid-template-columns:1fr}}@media print{body{background:#fff}.report{max-width:none;padding:0}.card,.section,.header,.acc{break-inside:avoid;page-break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="report"><div class="header"><h1>${esc(ESTABLISHMENT_NAME)}</h1><p><b>${esc(title)}</b></p><p>${esc(subtitle)}</p><p>Caixa <b>${esc(cashId)}</b> | Registro <b>${esc(reportId)}</b> | Abertura efetiva ${esc(formatCashOpenedAtLabel(openedAt))} | Fechamento ${esc(formatDateTimeWithDay(closedAt))} | Impresso por ${esc(printedBy?.name || "Sistema")} (${esc(roleLabel(printedBy?.role || "system"))})</p><div class="summary"><div class="card"><div class="k">Total Vendido</div><div class="v">${money(summary.total)}</div></div><div class="card"><div class="k">Recebido no Caixa</div><div class="v">${money(paymentTotals.pix + paymentTotals.cartao + paymentTotals.dinheiro + paymentTotals.outros)}</div></div><div class="card"><div class="k">Comandas</div><div class="v">${summary.commandasCount}</div></div><div class="card"><div class="k">Ticket Medio</div><div class="v">${money(summary.commandasCount ? summary.total / summary.commandasCount : 0)}</div></div><div class="card"><div class="k">Itens Vendidos</div><div class="v">${parseNumber(totals.soldQty)}</div></div><div class="card"><div class="k">Devolvidos/Excluidos</div><div class="v">${parseNumber(totals.returnedQty)}</div></div></div></div><div class="section"><h2>Itens Vendidos por Categoria</h2><p class="note">Categorias existentes com agrupamento por item.</p>${categoryCards || `<p class="note">Sem itens vendidos no periodo.</p>`}</div><div class="section"><h2>Performance por Garcom</h2><p class="note">Total de vendas e valor efetivamente recebido (sem fiado).</p><table><thead><tr><th>Garcom</th><th class="center">Comandas</th><th class="right">Vendido</th><th class="right">Recebido</th></tr></thead><tbody>${waiterRows || `<tr><td colspan="4">Sem comandas registradas por garcom.</td></tr>`}</tbody></table></div><div class="section"><h2>Financeiro</h2><div class="two"><div><p class="note">Resumo por forma de pagamento.</p><table><thead><tr><th>Metodo</th><th class="right">Total</th></tr></thead><tbody><tr><td>Pix</td><td class="right">${money(paymentTotals.pix)}</td></tr><tr><td>Cartao</td><td class="right">${money(paymentTotals.cartao)}</td></tr><tr><td>Dinheiro</td><td class="right">${money(paymentTotals.dinheiro)}</td></tr><tr><td>Fiado</td><td class="right">${money(paymentTotals.fiado)}</td></tr><tr><td>Outros</td><td class="right">${money(paymentTotals.outros)}</td></tr></tbody></table></div><div><p class="note">Lucro bruto x liquido (estimado pelo CMV cadastrado).</p><table><tbody><tr><th>Faturamento Bruto</th><td class="right">${money(financeiro.bruto)}</td></tr><tr><th>CMV</th><td class="right">${money(financeiro.cmv)}</td></tr><tr><th>Lucro Bruto</th><td class="right">${money(financeiro.lucroBruto)}</td></tr><tr><th>Perdas</th><td class="right">${money(financeiro.perdas)}</td></tr><tr><th>Lucro Liquido</th><td class="right">${money(financeiro.lucroLiquido)}</td></tr></tbody></table></div></div></div><div class="section"><h2>Comandas do Periodo</h2><p class="note">Uma linha por comanda (sem repeticao de item).</p><table><thead><tr><th>Comanda</th><th>Criada</th><th>Fechada</th><th>Garcom</th><th>Mesa/ref</th><th>Cliente</th><th>Status</th><th class="right">Total</th><th>Pagamento</th></tr></thead><tbody>${comandaRows || `<tr><td colspan="9">Sem comandas no periodo.</td></tr>`}</tbody></table></div></div></body></html>`;
+    return `<html><head><title>Extrato ${esc(cashId)}</title><style>@page{size:${pageSize};margin:4mm}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Arial,sans-serif;color:#12253f;background:#f4f7fb;font-size:10px}.report{max-width:${paperWidthMm}mm;margin:0 auto;padding:6px}.card,.section,.header{background:#fff;border:1px solid #dbe4f0;border-radius:10px}.header{padding:10px}.header h1{margin:0;font-size:16px}.header p{margin:4px 0 0;font-size:11px;color:#556a86}.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:10px}.card{padding:8px}.k{font-size:9px;text-transform:uppercase;color:#667a96}.v{margin-top:6px;font-size:15px;font-weight:700}.section{padding:10px;margin-top:10px}.section h2{margin:0 0 8px;font-size:14px}.note{margin:0 0 8px;font-size:10px;color:#667a96}.two{display:grid;grid-template-columns:1fr;gap:8px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{padding:5px 4px;border-bottom:1px solid #e7eef7;text-align:left;vertical-align:top}th{font-size:9px;text-transform:uppercase;color:#5d6f88}.right{text-align:right}.center{text-align:center}.acc{border:1px solid #dbe4f0;border-radius:8px;margin-bottom:8px;overflow:hidden}.acc summary{display:flex;justify-content:space-between;gap:6px;padding:8px 10px;background:#f5f9ff;list-style:none;font-size:11px}.acc summary::-webkit-details-marker{display:none}@media(max-width:900px){.summary{grid-template-columns:repeat(1,minmax(0,1fr))}.two{grid-template-columns:1fr}}@media print{body{background:#fff}.report{max-width:none;padding:0}.card,.section,.header,.acc{break-inside:avoid;page-break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="report"><div class="header"><h1>${esc(ESTABLISHMENT_NAME)}</h1><p><b>${esc(title)}</b></p><p>${esc(subtitle)}</p><p>Caixa <b>${esc(cashId)}</b> | Registro <b>${esc(reportId)}</b> | Abertura efetiva ${esc(formatCashOpenedAtLabel(openedAt))} | Fechamento ${esc(formatDateTimeWithDay(closedAt))} | Impresso por ${esc(printedBy?.name || "Sistema")} (${esc(roleLabel(printedBy?.role || "system"))})</p><div class="summary"><div class="card"><div class="k">Total Vendido</div><div class="v">${money(summary.total)}</div></div><div class="card"><div class="k">Recebido no Caixa</div><div class="v">${money(paymentTotals.pix + paymentTotals.cartao + paymentTotals.dinheiro + paymentTotals.outros)}</div></div><div class="card"><div class="k">Comandas</div><div class="v">${summary.commandasCount}</div></div><div class="card"><div class="k">Ticket Medio</div><div class="v">${money(summary.commandasCount ? summary.total / summary.commandasCount : 0)}</div></div><div class="card"><div class="k">Itens Vendidos</div><div class="v">${parseNumber(totals.soldQty)}</div></div><div class="card"><div class="k">Devolvidos/Excluidos</div><div class="v">${parseNumber(totals.returnedQty)}</div></div></div></div><div class="section"><h2>Itens Vendidos por Categoria</h2><p class="note">Categorias existentes com agrupamento por item.</p>${categoryCards || `<p class="note">Sem itens vendidos no periodo.</p>`}</div><div class="section"><h2>Performance por Garcom</h2><p class="note">Total de vendas e valor efetivamente recebido (sem fiado).</p><table><thead><tr><th>Garcom</th><th class="center">Comandas</th><th class="right">Vendido</th><th class="right">Recebido</th></tr></thead><tbody>${waiterRows || `<tr><td colspan="4">Sem comandas registradas por garcom.</td></tr>`}</tbody></table></div><div class="section"><h2>Financeiro</h2><div class="two"><div><p class="note">Resumo por forma de pagamento.</p><table><thead><tr><th>Metodo</th><th class="right">Total</th></tr></thead><tbody><tr><td>Pix</td><td class="right">${money(paymentTotals.pix)}</td></tr><tr><td>Cartao</td><td class="right">${money(paymentTotals.cartao)}</td></tr><tr><td>Dinheiro</td><td class="right">${money(paymentTotals.dinheiro)}</td></tr><tr><td>Fiado</td><td class="right">${money(paymentTotals.fiado)}</td></tr><tr><td>Outros</td><td class="right">${money(paymentTotals.outros)}</td></tr></tbody></table></div><div><p class="note">Lucro bruto x liquido (estimado pelo CMV cadastrado).</p><table><tbody><tr><th>Faturamento Bruto</th><td class="right">${money(financeiro.bruto)}</td></tr><tr><th>CMV</th><td class="right">${money(financeiro.cmv)}</td></tr><tr><th>Lucro Bruto</th><td class="right">${money(financeiro.lucroBruto)}</td></tr><tr><th>Perdas</th><td class="right">${money(financeiro.perdas)}</td></tr><tr><th>Lucro Liquido</th><td class="right">${money(financeiro.lucroLiquido)}</td></tr></tbody></table></div></div></div><div class="section"><h2>Comandas do Periodo</h2><p class="note">Uma linha por comanda (sem repeticao de item).</p><table><thead><tr><th>Comanda</th><th>Criada</th><th>Fechada</th><th>Garcom</th><th>Mesa/ref</th><th>Cliente</th><th>Status</th><th class="right">Total</th><th>Pagamento</th></tr></thead><tbody>${comandaRows || `<tr><td colspan="9">Sem comandas no periodo.</td></tr>`}</tbody></table></div></div></body></html>`;
   }
 
   function createCashHtmlReportRecord(closure, actor, html, options = {}) {
@@ -4325,7 +4325,7 @@
         createdByName: actor?.name || "",
         createdByRole: actor?.role || "",
         title: options.title || `Fechamento do caixa ${closure?.cashId || "-"} | Dia ${formatDateOnlySafe(referenceDay)}`,
-        subtitle: options.subtitle || "Historico do dia apos fechamento",
+        subtitle: options.subtitle || "Histórico do dia após fechamento",
         html: String(html || "")
       },
       0
@@ -4416,8 +4416,8 @@
     };
     printCashHistoryReport(preview, {
       printedBy: actor,
-      title: `Historico do dia - Caixa ${state.cash.id}`,
-      subtitle: "Previa para conferencia antes do fechamento"
+      title: `Histórico do dia - Caixa ${state.cash.id}`,
+      subtitle: "Prévia para conferência antes do fechamento"
     });
   }
 
@@ -4440,8 +4440,8 @@
     };
     const baseHtml = buildCashHistoryPrintHtml(preview, {
       printedBy: actor,
-      title: `Historico ESTENDIDO do dia - Caixa ${state.cash.id}`,
-      subtitle: "Relatorio completo com todas as alteracoes do dia"
+      title: `Histórico detalhado do dia - Caixa ${state.cash.id}`,
+      subtitle: "Relatório completo com todas as alterações do dia"
     });
     const auditEvents = dedupeAuditEvents([...state.auditLog]).sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0));
     const auditRows = auditEvents.length
@@ -4456,9 +4456,9 @@
       </table>
     `;
     const extendedHtml = baseHtml.replace("</body>", `${auditSection}</div></body>`).replace("</div></div></body>", "</div></body>");
-    openReceiptPopup(extendedHtml, "Permita pop-up para abrir o historico estendido.", "width=1100,height=900", {
-      previewTitle: `Historico ESTENDIDO - Caixa ${state.cash.id}`,
-      previewSubtitle: "Relatorio completo com todas as alteracoes"
+    openReceiptPopup(extendedHtml, "Permita pop-up para abrir o histórico estendido.", "width=1100,height=900", {
+      previewTitle: `Histórico estendido - Caixa ${state.cash.id}`,
+      previewSubtitle: "Relatório completo com todas as alterações"
     });
   }
 
@@ -4936,8 +4936,8 @@
             <button type="submit" class="btn danger" ${hasPendingOpen ? "disabled title=\"Feche todas as comandas abertas para continuar.\"" : ""}>Fechar Caixa Agora</button>
           </form>
           <div class="actions" style="margin-top:0.75rem;">
-            <button type="button" class="btn secondary" data-action="print-cash-day-history">Ver historico do dia</button>
-            <button type="button" class="btn secondary" data-action="print-cash-day-history-extended">Ver historico do dia estendido</button>
+            <button type="button" class="btn secondary" data-action="print-cash-day-history">Ver histórico do dia</button>
+            <button type="button" class="btn secondary" data-action="print-cash-day-history-extended">Ver histórico do dia detalhado</button>
           </div>
           <p class="note" style="margin-top:0.35rem;">Relatorio simples: resumo do caixa, pagamentos e comandas do dia. No fechamento, o HTML do relatorio e arquivado automaticamente.</p>
         </div>

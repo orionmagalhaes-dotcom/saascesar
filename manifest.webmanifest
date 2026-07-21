@@ -1,11 +1,11 @@
 {
-  "name": "POPEYE HAMUBURGUERIA ARTESANAL",
+  "name": "POPEYE HAMBURGUERIA ARTESANAL",
   "short_name": "Popeye Burger",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#fff8df",
   "theme_color": "#ffd21a",
-  "description": "Controle de pedidos da POPEYE HAMUBURGUERIA ARTESANAL.",
+  "description": "Controle de pedidos da POPEYE HAMBURGUERIA ARTESANAL.",
   "icons": [
     {
       "src": "./icon-192.png",
