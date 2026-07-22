@@ -4958,26 +4958,44 @@
       showAdminControls && String(uiState.adminInlineEditComandaId || "") === String(comanda.id || "");
 
     if (!showAdminControls) {
-      const rows = (comanda.items || [])
-        .map((item) => {
-          const itemStatus = item.canceled ? "Cancelado" : item.delivered ? "Entregue" : "Pendente";
-          const statusClass = item.canceled ? "status-cancelado" : item.delivered ? "status-entregue" : "status-pendente";
-          const statusHtml = `<span class="status-pill ${statusClass}">${itemStatus}</span>`;
+      const groups = groupComandaItems(comanda.items || []);
+      const rows = groups.map(({ main, addons }) => {
+        const itemStatus = main.canceled ? "Cancelado" : main.delivered ? "Entregue" : "Pendente";
+        const statusClass = main.canceled ? "status-cancelado" : main.delivered ? "status-entregue" : "status-pendente";
+        const statusHtml = `<span class="status-pill ${statusClass}">${itemStatus}</span>`;
+        const addonRows = addons.map(addon => {
+          const addonStatus = addon.canceled ? "Cancelado" : addon.delivered ? "Entregue" : "Pendente";
+          const addonStatusClass = addon.canceled ? "status-cancelado" : addon.delivered ? "status-entregue" : "status-pendente";
+          const addonStatusHtml = `<span class="status-pill ${addonStatusClass}">${addonStatus}</span>`;
           return `
-            <tr>
-              <td><b>${esc(item.name)}</b></td>
+            <tr style="background:#f9f9f9;">
+              <td style="padding-left:16px;"><small>+ ${esc(addon.name)}</small></td>
               <td class="separator-col">|</td>
-              <td class="center-col">${item.qty}</td>
+              <td class="center-col"><small>${addon.qty}</small></td>
               <td class="separator-col">|</td>
-              <td class="price-col">${money(item.priceAtSale)}</td>
+              <td class="price-col"><small>${money(addon.priceAtSale)}</small></td>
               <td class="separator-col">|</td>
-              <td class="status-col">${statusHtml}</td>
+              <td class="status-col">${addonStatusHtml}</td>
               <td class="separator-col">|</td>
-              <td>${esc(item.waiterNote || "-")}</td>
+              <td><small>${esc(addon.waiterNote || "-")}</small></td>
             </tr>
           `;
-        })
-        .join("");
+        }).join("");
+        return `
+          <tr>
+            <td><b>${esc(main.name)}</b></td>
+            <td class="separator-col">|</td>
+            <td class="center-col">${main.qty}</td>
+            <td class="separator-col">|</td>
+            <td class="price-col">${money(main.priceAtSale)}</td>
+            <td class="separator-col">|</td>
+            <td class="status-col">${statusHtml}</td>
+            <td class="separator-col">|</td>
+            <td>${esc(main.waiterNote || "-")}</td>
+          </tr>
+          ${addonRows}
+        `;
+      }).join("");
 
       const comandaEvents = (comanda.events || []).slice(-40).reverse();
       const events = comandaEvents
@@ -5046,23 +5064,37 @@
       `;
     }
 
-    const rows = (comanda.items || [])
-      .map((item) => {
-        const itemStatus =
-          itemNeedsKitchen(item) && !item.canceled
-            ? `${esc(kitchenStatusLabel(item.kitchenStatus || "fila"))} | ${esc(kitchenPriorityLabel(item.kitchenPriority || "normal"))}`
-            : item.canceled
+    const groups = groupComandaItems(comanda.items || []);
+    const rows = groups.map(({ main, addons }) => {
+      const itemStatus =
+        itemNeedsKitchen(main) && !main.canceled
+          ? `${esc(kitchenStatusLabel(main.kitchenStatus || "fila"))} | ${esc(kitchenPriorityLabel(main.kitchenPriority || "normal"))}`
+          : main.canceled
+            ? "Cancelado"
+            : main.delivered
+              ? "Entregue"
+              : "Pendente";
+      const adminActions =
+        showAdminControls && main.id && !isFiadoPendingComanda
+          ? `<td><div class="actions admin-item-actions"><button class="btn secondary compact-action" data-action="admin-edit-comanda-item" data-comanda-id="${esc(comanda.id)}" data-item-id="${esc(main.id)}">Editar</button><button class="btn danger compact-action" data-action="admin-remove-comanda-item" data-comanda-id="${esc(comanda.id)}" data-item-id="${esc(main.id)}">Remover</button></div></td>`
+          : "";
+      const addonRows = addons.map(addon => {
+        const addonStatus =
+          itemNeedsKitchen(addon) && !addon.canceled
+            ? `${esc(kitchenStatusLabel(addon.kitchenStatus || "fila"))} | ${esc(kitchenPriorityLabel(addon.kitchenPriority || "normal"))}`
+            : addon.canceled
               ? "Cancelado"
-              : item.delivered
+              : addon.delivered
                 ? "Entregue"
                 : "Pendente";
-        const adminActions =
-          showAdminControls && item.id && !isFiadoPendingComanda
-            ? `<td><div class="actions admin-item-actions"><button class="btn secondary compact-action" data-action="admin-edit-comanda-item" data-comanda-id="${esc(comanda.id)}" data-item-id="${esc(item.id)}">Editar</button><button class="btn danger compact-action" data-action="admin-remove-comanda-item" data-comanda-id="${esc(comanda.id)}" data-item-id="${esc(item.id)}">Remover</button></div></td>`
+        const addonAdminActions =
+          showAdminControls && addon.id && !isFiadoPendingComanda
+            ? `<td><div class="actions admin-item-actions"><button class="btn secondary compact-action" data-action="admin-edit-comanda-item" data-comanda-id="${esc(comanda.id)}" data-item-id="${esc(addon.id)}">Editar</button><button class="btn danger compact-action" data-action="admin-remove-comanda-item" data-comanda-id="${esc(comanda.id)}" data-item-id="${esc(addon.id)}">Remover</button></div></td>`
             : "";
-        return `<tr><td>${esc(item.name)}</td><td>${item.qty}</td><td>${money(item.priceAtSale)}</td><td>${itemStatus}</td><td>${esc(item.waiterNote || "-")}${item.deliveryRequested ? ` | Entrega: ${esc(item.deliveryRecipient || "-")} @ ${esc(item.deliveryLocation || "-")}` : ""}</td>${adminActions}</tr>`;
-      })
-      .join("");
+        return `<tr style="background:#f9f9f9;"><td style="padding-left:16px;"><small>+ ${esc(addon.name)}</small></td><td><small>${addon.qty}</small></td><td><small>${money(addon.priceAtSale)}</small></td><td><small>${addonStatus}</small></td><td><small>${esc(addon.waiterNote || "-")}${addon.deliveryRequested ? ` | Entrega: ${esc(addon.deliveryRecipient || "-")} @ ${esc(addon.deliveryLocation || "-")}` : ""}</small></td>${addonAdminActions}</tr>`;
+      }).join("");
+      return `<tr><td>${esc(main.name)}</td><td>${main.qty}</td><td>${money(main.priceAtSale)}</td><td>${itemStatus}</td><td>${esc(main.waiterNote || "-")}${main.deliveryRequested ? ` | Entrega: ${esc(main.deliveryRecipient || "-")} @ ${esc(main.deliveryLocation || "-")}` : ""}</td>${adminActions}</tr>${addonRows}`;
+    }).join("");
     const comandaEvents = (comanda.events || []).slice(-40).reverse();
     const events = comandaEvents
       .map((e) => `<tr><td>${formatDateTime(e.ts)}</td><td>${esc(e.actorName)}</td><td>${renderEventTypeTag(e.type)}</td><td>${esc(maskComandaCodesInText(e.detail))}</td></tr>`)
@@ -6398,7 +6430,10 @@
         }`
         : `
         <div class="item-list">
-          ${(comanda.items || []).length ? (comanda.items || []).map((item) => renderItemRow(comanda, item)).join("") : `<div class="empty">Sem itens ainda.</div>`}
+          ${(comanda.items || []).length ? groupComandaItems(comanda.items || []).map(({ main, addons }) => `
+            ${renderItemRow(comanda, main)}
+            ${addons.map(addon => `<div style="padding-left:16px; border-left:3px solid #ddd; margin-left:8px;">${renderItemRow(comanda, addon)}</div>`).join("")}
+          `).join("") : `<div class="empty">Sem itens ainda.</div>`}
         </div>
 
         <form class="form compact" data-role="${formRole}" data-comanda-id="${comanda.id}">
@@ -7768,6 +7803,28 @@
     const comanda = findOpenComandaForActor(comandaId, actor, { silent: true });
     if (!comanda) return [];
     return (comanda.items || []).filter((item) => !item.canceled && parseNumber(item.qty || 0) > 0);
+  }
+
+  function groupComandaItems(items) {
+    const itemMap = new Map();
+    const mainItems = [];
+    for (const item of items || []) {
+      if (!item) continue;
+      itemMap.set(item.id, item);
+      if (!item.addonForItemId) {
+        mainItems.push(item);
+      }
+    }
+    const groups = mainItems.map((main) => ({
+      main,
+      addons: (items || []).filter((i) => i && i.addonForItemId === main.id)
+    }));
+    // Add orphan add-ons as main items if any
+    const orphanAddons = (items || []).filter((i) => i && i.addonForItemId && !itemMap.has(i.addonForItemId));
+    for (const orphan of orphanAddons) {
+      groups.push({ main: orphan, addons: [] });
+    }
+    return groups;
   }
 
   function openComandaItemSelector(comandaId, mode = "increment") {
@@ -10411,16 +10468,19 @@
 
     const reason = String(options.reason || "Novo pedido");
     const generatedAt = isoNow();
-    const printableItems = kitchenItems
-      .map((item) => {
-        const note = item.waiterNote ? `<p class="line note">Obs do pedido: ${esc(item.waiterNote)}</p>` : "";
-        const delivery = item.deliveryRequested
-          ? `<p class="line note">Entrega: ${esc(item.deliveryRecipient || "-")} | ${esc(item.deliveryLocation || "-")}</p>`
+    const groups = groupComandaItems(kitchenItems);
+    const printableItems = groups
+      .map(({ main, addons }) => {
+        const note = main.waiterNote ? `<p class="line note">Obs do pedido: ${esc(main.waiterNote)}</p>` : "";
+        const delivery = main.deliveryRequested
+          ? `<p class="line note">Entrega: ${esc(main.deliveryRecipient || "-")} | ${esc(main.deliveryLocation || "-")}</p>`
           : "";
+        const addonLines = addons.map(addon => `<p class="line">&nbsp;&nbsp;+ ${esc(addon.name)} x${parseNumber(addon.qty || 0)}</p>`).join("");
         return `
           <div class="item">
-            <p class="line"><b>${esc(item.name)}</b></p>
-            <p class="line">Qtd: <b>${parseNumber(item.qty || 0)}</b> | Prioridade: ${esc(kitchenPriorityLabel(item.kitchenPriority || "normal"))}</p>
+            <p class="line"><b>${esc(main.name)}</b></p>
+            <p class="line">Qtd: <b>${parseNumber(main.qty || 0)}</b> | Prioridade: ${esc(kitchenPriorityLabel(main.kitchenPriority || "normal"))}</p>
+            ${addonLines}
             ${note}
             ${delivery}
           </div>
@@ -10499,11 +10559,13 @@
 
     if (isOrderTicket) {
       const targetItems = Array.isArray(options.itemsToPrint) ? options.itemsToPrint : (comanda?.items || []).filter((i) => i && !i.canceled);
-      const itemsText = targetItems
-        .map((item) => {
-          const obs = item.waiterNote ? `  * OBS COZINHA: ${item.waiterNote}\n` : "";
-          const del = item.deliveryRequested ? `  * PARA VIAGEM: ${item.deliveryRecipient} - ${item.deliveryLocation}\n` : "";
-          return `${String(item.name)} x${parseNumber(item.qty)}\n${obs}${del}`;
+      const groups = groupComandaItems(targetItems);
+      const itemsText = groups
+        .map(({ main, addons }) => {
+          const obs = main.waiterNote ? `  * OBS COZINHA: ${main.waiterNote}\n` : "";
+          const del = main.deliveryRequested ? `  * PARA VIAGEM: ${main.deliveryRecipient} - ${main.deliveryLocation}\n` : "";
+          const addonLines = addons.map(addon => `  + ${addon.name} x${parseNumber(addon.qty || 0)}\n`).join("");
+          return `${String(main.name)} x${parseNumber(main.qty)}\n${addonLines}${obs}${del}`;
         })
         .join("") || "Sem itens\n";
 
@@ -10527,14 +10589,20 @@
       return ticketLines.filter(Boolean).join("\n");
     } else {
       // Client receipt
-      const itemsText = (comanda?.items || [])
-        .filter((i) => i && !i.canceled && itemCountsForTotal(i))
-        .map((item) => {
-          const unit = parseNumber(item.priceAtSale || 0);
-          const qty = parseNumber(item.qty || 0);
-          const obs = item.waiterNote ? `  * Obs: ${item.waiterNote}\n` : "";
-          const del = item.deliveryRequested ? `  * Para Viagem: ${item.deliveryRecipient} - ${item.deliveryLocation}\n` : "";
-          return `${String(item.name)} x${qty}  ${money(unit * qty)}\n${obs}${del}`.trim();
+      const targetItems = (comanda?.items || []).filter((i) => i && !i.canceled && itemCountsForTotal(i));
+      const groups = groupComandaItems(targetItems);
+      const itemsText = groups
+        .map(({ main, addons }) => {
+          const unit = parseNumber(main.priceAtSale || 0);
+          const qty = parseNumber(main.qty || 0);
+          const obs = main.waiterNote ? `  * Obs: ${main.waiterNote}\n` : "";
+          const del = main.deliveryRequested ? `  * Para Viagem: ${main.deliveryRecipient} - ${main.deliveryLocation}\n` : "";
+          const addonLines = addons.map(addon => {
+            const addonUnit = parseNumber(addon.priceAtSale || 0);
+            const addonQty = parseNumber(addon.qty || 0);
+            return `  + ${addon.name} x${addonQty}  ${money(addonUnit * addonQty)}\n`;
+          }).join("");
+          return `${String(main.name)} x${qty}  ${money(unit * qty)}\n${addonLines}${obs}${del}`.trim();
         })
         .join("\n") || "Sem itens";
 
@@ -10592,15 +10660,18 @@
 
     if (isOrderTicket) {
       // 1. KITCHEN / ORDER TICKET (Pedido)
-      const rows = itemsToPrint
-        .map((i) => {
-          const qty = parseNumber(i.qty || 0);
-          const obs = i.waiterNote ? `<div class="item-obs">-> OBS COZINHA: <b>${esc(i.waiterNote)}</b></div>` : "";
-          const del = i.deliveryRequested ? `<div class="item-obs">-> PARA VIAGEM: <b>${esc(i.deliveryRecipient)}</b> @ <b>${esc(i.deliveryLocation)}</b></div>` : "";
+      const groups = groupComandaItems(itemsToPrint);
+      const rows = groups
+        .map(({ main, addons }) => {
+          const qty = parseNumber(main.qty || 0);
+          const obs = main.waiterNote ? `<div class="item-obs">-> OBS COZINHA: <b>${esc(main.waiterNote)}</b></div>` : "";
+          const del = main.deliveryRequested ? `<div class="item-obs">-> PARA VIAGEM: <b>${esc(main.deliveryRecipient)}</b> @ <b>${esc(main.deliveryLocation)}</b></div>` : "";
+          const addonLines = addons.map(addon => `<div style="padding-left: 8px;"><small>+ ${esc(addon.name)} x${parseNumber(addon.qty || 0)}</small></div>`).join("");
           return `
             <tr>
               <td>
-                <b>${esc(i.name)}</b>
+                <b>${esc(main.name)}</b>
+                ${addonLines}
                 ${obs}
                 ${del}
               </td>
@@ -10669,17 +10740,30 @@
       `;
     } else {
       // 2. CLIENT RECEIPT (Gerar Nota) - More simplified, clearly marked for client
-      const rows = (comanda.items || [])
-        .filter((i) => i && !i.canceled && itemCountsForTotal(i))
-        .map((i) => {
-          const qty = parseNumber(i.qty || 0);
-          const unit = parseNumber(i.priceAtSale || 0);
-          const obs = i.waiterNote ? `<small style="display:block;">Obs: ${esc(i.waiterNote)}</small>` : "";
-          const del = i.deliveryRequested ? `<small style="display:block;">Para Viagem: ${esc(i.deliveryRecipient)} - ${esc(i.deliveryLocation)}</small>` : "";
+      const targetItems = (comanda.items || []).filter((i) => i && !i.canceled && itemCountsForTotal(i));
+      const groups = groupComandaItems(targetItems);
+      const rows = groups
+        .map(({ main, addons }) => {
+          const qty = parseNumber(main.qty || 0);
+          const unit = parseNumber(main.priceAtSale || 0);
+          const obs = main.waiterNote ? `<small style="display:block;">Obs: ${esc(main.waiterNote)}</small>` : "";
+          const del = main.deliveryRequested ? `<small style="display:block;">Para Viagem: ${esc(main.deliveryRecipient)} - ${esc(main.deliveryLocation)}</small>` : "";
+          const addonRows = addons.map(addon => {
+            const addonQty = parseNumber(addon.qty || 0);
+            const addonUnit = parseNumber(addon.priceAtSale || 0);
+            return `
+              <tr>
+                <td style="padding-left:12px;"><small>+ ${esc(addon.name)}</small></td>
+                <td><small>${addonQty}</small></td>
+                <td><small>${esc(money(addonUnit))}</small></td>
+                <td><small>${money(addonQty * addonUnit)}</small></td>
+              </tr>
+            `;
+          }).join("");
           return `
             <tr>
               <td>
-                <b>${esc(i.name)}</b>
+                <b>${esc(main.name)}</b>
                 ${obs}
                 ${del}
               </td>
@@ -10687,6 +10771,7 @@
               <td>${esc(money(unit))}</td>
               <td><b>${money(qty * unit)}</b></td>
             </tr>
+            ${addonRows}
           `;
         })
         .join("");
