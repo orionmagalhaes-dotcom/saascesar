@@ -8,6 +8,7 @@
   const CLIENT_SESSION_KEY = "restobar_local_client_session_id";
   const PRINTER_PREFS_KEY = "restobar_local_printer_prefs_v1";
   const HISTORY_RETENTION_DAYS = 90;
+  const CASH_HTML_REPORT_RETENTION_DAYS = 30;
   const PAYABLES_RETENTION_DAYS = 350;
   const CASH_HTML_REPORTS_LIMIT = 120;
   const INTERNAL_CASH_AUDIT_LIMIT = 120;
@@ -60,15 +61,15 @@
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1bWFodGNsdXpmdHpvc2FkdWx4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NDQxMDMsImV4cCI6MjEwMDEyMDEwM30.H_LyxgAc6JwkiqCuN2bsXHpANkalyM5CWj1Iv2GLRcI";
   const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_nUNetGGU0j9KmiPq8XOxdg_Z0RH0xo7";
   const SUPABASE_PROJECT_ID = "fumahtcluzftzosadulx";
-  const DEV_ACCESS_LOGIN = "dev1";
-  const DEV_ACCESS_PASSWORD = "dev1";
+  const DEV_ACCESS_LOGIN = "dev";
+  const DEV_ACCESS_PASSWORD = "dev";
   const DEV_SESSION_ID = "__dev__";
   const DEVICE_PRESENCE_TTL_MS = 45 * 1000;
   const DEVICE_PRESENCE_PING_MS = 10 * 1000;
   const CLOUD_SYNC_DEBOUNCE_MS = 250;
   const CLOUD_PULL_DEBOUNCE_MS = 400;
   const CLOUD_REMOTE_PULL_DEBOUNCE_MS = 120;
-  const CLOUD_POLL_INTERVAL_MS = 30 * 1000;
+  const CLOUD_POLL_INTERVAL_MS = 2 * 1000;
   const ROLE_ACCESS_CODE_BY_ROLE = Object.freeze({
     admin: "1111",
     waiter: "2222"
@@ -82,6 +83,7 @@
     devTab: "monitor",
     waiterTab: "abrir",
     cookTab: "ativos",
+    cashHtmlViewerReportId: "",
     finalizeOpenByComanda: {},
     waiterCollapsedByComanda: {},
     adminKitchenCollapsedByRow: {},
@@ -248,6 +250,7 @@
   }
 
   function sanitizeOperationalComandasAgainstHistory(targetState) {
+    console.log("[sanitizeOperationalComandasAgainstHistory] Starting, targetState.openComandas count:", targetState.openComandas?.length);
     if (!targetState || typeof targetState !== "object") return;
     targetState.history90 = sanitizeHistoryClosuresByCashWindow(targetState.history90);
     const archivedIds = new Set(
@@ -256,17 +259,30 @@
         .map((comanda) => String(comanda?.id || "").trim())
         .filter(Boolean)
     );
+    console.log("[sanitizeOperationalComandasAgainstHistory] archivedIds:", Array.from(archivedIds));
     const closedComandas = dedupeComandasById(targetState.closedComandas).filter(
       (comanda) => !archivedIds.has(String(comanda?.id || "").trim())
     );
+    console.log("[sanitizeOperationalComandasAgainstHistory] closedComandas after filter:", closedComandas);
     const closedIds = new Set(closedComandas.map((comanda) => String(comanda?.id || "").trim()).filter(Boolean));
+    console.log("[sanitizeOperationalComandasAgainstHistory] closedIds:", Array.from(closedIds));
     const openComandas = dedupeComandasById(targetState.openComandas).filter((comanda) => {
       const id = String(comanda?.id || "").trim();
-      if (!id) return false;
-      if (archivedIds.has(id)) return false;
-      if (closedIds.has(id)) return false;
+      if (!id) {
+        console.log("[sanitizeOperationalComandasAgainstHistory] Filtering out comanda with no id:", comanda);
+        return false;
+      }
+      if (archivedIds.has(id)) {
+        console.log("[sanitizeOperationalComandasAgainstHistory] Filtering out comanda (in archivedIds):", id);
+        return false;
+      }
+      if (closedIds.has(id)) {
+        console.log("[sanitizeOperationalComandasAgainstHistory] Filtering out comanda (in closedIds):", id);
+        return false;
+      }
       return true;
     });
+    console.log("[sanitizeOperationalComandasAgainstHistory] Final openComandas:", openComandas);
     targetState.closedComandas = closedComandas;
     targetState.openComandas = openComandas;
     synchronizeCashOpenedAt(targetState);
@@ -656,6 +672,7 @@
   function mergedRowsById(localRows, remoteRows, deletedIds = [], options = {}) {
     const preferLocal = options.preferLocal !== false;
     const allowRemoteOnly = options.allowRemoteOnly !== false;
+    const getTimestamp = options.getTimestamp || null;
     const deletedSet = new Set(normalizeDeletedIdList(deletedIds));
     const localMap = new Map();
     for (const row of Array.isArray(localRows) ? localRows : []) {
@@ -678,7 +695,16 @@
     for (const row of secondRows) {
       const id = String(row?.id ?? "").trim();
       if (!id || deletedSet.has(id)) continue;
-      map.set(id, { ...row });
+      if (map.has(id) && getTimestamp) {
+        const existing = map.get(id);
+        const merged = pickRowByTimestamp(existing, row, {
+          getTimestamp,
+          preferLocal
+        });
+        map.set(id, merged);
+      } else {
+        map.set(id, { ...row });
+      }
     }
     return [...map.values()].sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0));
   }
@@ -886,63 +912,8 @@
   }
 
   function applyOperationalResetCutoff(targetState, cutoffIso) {
-    if (!targetState || typeof targetState !== "object") return;
-    const normalizedCutoff = normalizeOperationalResetAt(cutoffIso);
-    if (!normalizedCutoff) return;
-    const cutoffMs = parseUpdatedAtTimestamp(normalizedCutoff);
-    if (!cutoffMs) return;
-
-    const tsAtOrAfterCutoff = (value) => {
-      const ts = parseUpdatedAtTimestamp(value);
-      return ts && ts >= cutoffMs;
-    };
-
-    const filterComandaRows = (rows) =>
-      (Array.isArray(rows) ? rows : [])
-        .map((comanda) => {
-          const copy = { ...comanda };
-          const events = (Array.isArray(copy.events) ? copy.events : []).filter((event) => tsAtOrAfterCutoff(event?.ts));
-          copy.events = events;
-          const latestEventTs = Math.max(0, ...events.map((event) => parseUpdatedAtTimestamp(event?.ts)));
-          const createdTs = parseUpdatedAtTimestamp(copy.createdAt);
-          const closedTs = parseUpdatedAtTimestamp(copy.closedAt);
-          const keep = createdTs >= cutoffMs || closedTs >= cutoffMs || latestEventTs >= cutoffMs;
-          return keep ? copy : null;
-        })
-        .filter(Boolean);
-
-    targetState.openComandas = filterComandaRows(targetState.openComandas);
-    targetState.closedComandas = filterComandaRows(targetState.closedComandas);
-
-    targetState.history90 = (Array.isArray(targetState.history90) ? targetState.history90 : [])
-      .map((entry) => {
-        const copy = { ...entry };
-        copy.commandas = filterComandaRows(copy.commandas);
-        copy.auditLog = (Array.isArray(copy.auditLog) ? copy.auditLog : []).filter((event) => tsAtOrAfterCutoff(event?.ts));
-        const closureTs = parseUpdatedAtTimestamp(copy.closedAt || copy.createdAt || copy.updatedAt);
-        const keep = closureTs >= cutoffMs || copy.commandas.length > 0 || copy.auditLog.length > 0;
-        return keep ? copy : null;
-      })
-      .filter(Boolean);
-
-    targetState.auditLog = (Array.isArray(targetState.auditLog) ? targetState.auditLog : []).filter((event) => tsAtOrAfterCutoff(event?.ts));
-    targetState.payables = (Array.isArray(targetState.payables) ? targetState.payables : []).filter((row) => tsAtOrAfterCutoff(row?.paidAt || row?.createdAt));
-    targetState.cookHistory = (Array.isArray(targetState.cookHistory) ? targetState.cookHistory : []).filter((row) =>
-      tsAtOrAfterCutoff(row?.updatedAt || row?.deliveredAt)
-    );
-    targetState.cashHtmlReports = (Array.isArray(targetState.cashHtmlReports) ? targetState.cashHtmlReports : []).filter((row) =>
-      tsAtOrAfterCutoff(row?.closedAt || row?.createdAt)
-    );
-    targetState.internalCashAudits = (Array.isArray(targetState.internalCashAudits) ? targetState.internalCashAudits : []).filter((row) =>
-      tsAtOrAfterCutoff(row?.closedAt || row?.createdAt)
-    );
-    targetState.financeCycleReports = (Array.isArray(targetState.financeCycleReports) ? targetState.financeCycleReports : []).filter((row) =>
-      tsAtOrAfterCutoff(row?.endAt || row?.generatedAt)
-    );
-
-    targetState.meta = targetState.meta || {};
-    targetState.meta.operationalResetAt = normalizedCutoff;
-    targetState.meta.financeCycleStartedAt = tsAtOrAfterCutoff(targetState.meta.financeCycleStartedAt) ? normalizeIsoTimestamp(targetState.meta.financeCycleStartedAt) : "";
+    // No-op: Never apply operational reset cutoff to prevent losing data on refresh
+    // Data should only be deleted manually or via programmed functions
   }
 
   function stateFootprint(source) {
@@ -986,22 +957,11 @@
   }
 
   function resolveOperationalResetAtForMerge(localState, remoteState) {
-    const localResetAt = normalizeOperationalResetAt(localState?.meta?.operationalResetAt);
-    const remoteResetAt = normalizeOperationalResetAt(remoteState?.meta?.operationalResetAt);
-    if (!localResetAt) return remoteResetAt;
-    if (!remoteResetAt) return localResetAt;
-    const localTs = parseUpdatedAtTimestamp(localResetAt);
-    const remoteTs = parseUpdatedAtTimestamp(remoteResetAt);
-    if (localTs > remoteTs) {
-      const remote = stateFootprint(remoteState);
-      if (!isLikelyResetState(remoteState) && remote.operationalRows >= 5) {
-        return remoteResetAt;
-      }
-    }
-    return selectLatestOperationalResetAt(localResetAt, remoteResetAt);
+    return ""; // Never apply operational reset when merging state to prevent data loss
   }
 
   function mergeStateForCloud(localState, remoteState) {
+    console.log("[mergeStateForCloud] Starting, local openComandas count:", localState.openComandas?.length, "remote openComandas count:", remoteState.openComandas?.length);
     const localMeta = localState?.meta || {};
     const remoteMeta = remoteState?.meta || {};
     const localUpdated = parseUpdatedAtTimestamp(localMeta.updatedAt);
@@ -1026,6 +986,7 @@
       ...(Array.isArray(localMeta.deletedComandaIds) ? localMeta.deletedComandaIds : []),
       ...(Array.isArray(remoteMeta.deletedComandaIds) ? remoteMeta.deletedComandaIds : [])
     ]);
+    console.log("[mergeStateForCloud] deletedComandaIds:", deletedComandaIds);
     const deletedComandaSet = new Set(deletedComandaIds);
     const deletedProductIds = sanitizeDeletedProductIds(deletedProductIdsRaw, localState, remoteState);
     const deletedUserIds = sanitizeDeletedUserIds(deletedUserIdsRaw, localState, remoteState);
@@ -1038,13 +999,17 @@
       allowRemoteOnly: allowRemoteOperationalInsert,
       deletedIds: deletedComandaIds
     });
+    console.log("[mergeStateForCloud] mergedOpenComandasRaw count:", mergedOpenComandasRaw?.length);
     const mergedClosedComandas = mergeComandasById(localState?.closedComandas, remoteState?.closedComandas, {
       preferLocal,
       allowRemoteOnly: allowRemoteOperationalInsert,
       deletedIds: deletedComandaIds
     });
+    console.log("[mergeStateForCloud] mergedClosedComandas count:", mergedClosedComandas?.length);
     const closedIds = new Set(mergedClosedComandas.map((comanda) => String(comanda?.id || "").trim()).filter(Boolean));
+    console.log("[mergeStateForCloud] closedIds:", Array.from(closedIds));
     const mergedOpenComandas = mergedOpenComandasRaw.filter((comanda) => !closedIds.has(String(comanda?.id || "").trim()));
+    console.log("[mergeStateForCloud] mergedOpenComandas count after closedIds filter:", mergedOpenComandas?.length);
     const mergedHistory90 = mergeRowsByIdWithTimestamp(localState?.history90, remoteState?.history90, {
       getTimestamp: (row) => row?.closedAt || row?.createdAt || row?.updatedAt || "",
       preferLocal,
@@ -1089,11 +1054,13 @@
       ...(preferLocal ? localState : remoteState),
       users: mergedRowsById(localState?.users, remoteState?.users, deletedUserIds, {
         preferLocal,
-        allowRemoteOnly: !preferLocal
+        allowRemoteOnly: !preferLocal,
+        getTimestamp: (user) => user?.updatedAt || ""
       }),
       products: mergedRowsById(localState?.products, remoteState?.products, deletedProductIds, {
         preferLocal,
-        allowRemoteOnly: !preferLocal
+        allowRemoteOnly: !preferLocal,
+        getTimestamp: (product) => product?.updatedAt || ""
       }),
       openComandas: mergedOpenComandas,
       closedComandas: mergedClosedComandas,
@@ -1117,15 +1084,20 @@
       },
       cash: { ...(preferLocal ? remoteState?.cash || {} : localState?.cash || {}), ...(preferLocal ? localState?.cash || {} : remoteState?.cash || {}) }
     };
+    console.log("[mergeStateForCloud] After building merged object, merged.openComandas count:", merged.openComandas?.length);
     applyOperationalResetCutoff(merged, operationalResetAt);
+    console.log("[mergeStateForCloud] After applyOperationalResetCutoff, merged.openComandas count:", merged.openComandas?.length);
     applyRealtimeAuditCutoff(merged, realtimeAuditResetAt);
+    console.log("[mergeStateForCloud] After applyRealtimeAuditCutoff, merged.openComandas count:", merged.openComandas?.length);
     sanitizeOperationalComandasAgainstHistory(merged);
+    console.log("[mergeStateForCloud] After sanitizeOperationalComandasAgainstHistory, merged.openComandas count:", merged.openComandas?.length);
     merged.seq = merged.seq || {};
     const maxUserId = Math.max(0, ...(Array.isArray(merged.users) ? merged.users : []).map((u) => Number(u?.id || 0)));
     const maxProductId = Math.max(0, ...(Array.isArray(merged.products) ? merged.products : []).map((p) => Number(p?.id || 0)));
     merged.seq.user = Math.max(Number(merged.seq.user || 0), maxUserId + 1);
     merged.seq.product = Math.max(Number(merged.seq.product || 0), maxProductId + 1);
     recomputeComandaSequence(merged);
+    console.log("[mergeStateForCloud] Final merged.openComandas count:", merged.openComandas?.length);
     return merged;
   }
 
@@ -1235,7 +1207,7 @@
   }
 
   function pruneCashHtmlReports(state) {
-    const threshold = Date.now() - HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const threshold = Date.now() - CASH_HTML_REPORT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
     const normalized = (state.cashHtmlReports || [])
       .map((entry, idx) => normalizeCashHtmlReportRecord(entry, idx))
       .filter((entry) => {
@@ -1735,6 +1707,21 @@
     normalized.available = product.available !== false;
     normalized.requiresKitchen =
       KITCHEN_CATEGORIES.has(effectiveCategory) ? true : effectiveCategory === "Ofertas" ? Boolean(product.requiresKitchen) : false;
+    normalized.updatedAt = product.updatedAt ? String(product.updatedAt) : isoNow();
+    return normalized;
+  }
+
+  function normalizeUserRecord(user, fallbackId = 0) {
+    const normalized = {
+      ...user,
+      id: Number(user.id || fallbackId),
+      name: String(user.name || ""),
+      role: String(user.role || "waiter"),
+      login: String(user.login || "").trim(),
+      password: String(user.password || ""),
+      active: user.active !== false,
+      updatedAt: user.updatedAt ? String(user.updatedAt) : isoNow()
+    };
     return normalized;
   }
 
@@ -1779,6 +1766,7 @@
   }
 
   function normalizeStateShape(source) {
+    console.log("[normalizeStateShape] Starting with source, openComandas count:", source.openComandas?.length);
     const parsed = source && typeof source === "object" ? source : {};
     const fallback = initialState();
     const deletedProductIdsRaw = normalizeDeletedIdList(parsed.meta?.deletedProductIds);
@@ -1787,7 +1775,7 @@
     const normalized = {
       ...fallback,
       ...parsed,
-      users: Array.isArray(parsed.users) ? parsed.users : fallback.users,
+      users: Array.isArray(parsed.users) ? parsed.users.map((u, idx) => normalizeUserRecord(u || {}, idx + 1)) : fallback.users.map((u) => normalizeUserRecord(u || {}, u.id)),
       products: Array.isArray(parsed.products)
         ? parsed.products.map((p, idx) => normalizeProductRecord(p || {}, idx + 1))
         : fallback.products.map((p) => normalizeProductRecord(p || {}, p.id)),
@@ -1820,7 +1808,7 @@
         deletedUserIds: deletedUserIdsRaw,
         deletedComandaIds: deletedComandaIdsRaw,
         financeCycleStartedAt: normalizeIsoTimestamp(parsed.meta?.financeCycleStartedAt),
-        operationalResetAt: normalizeOperationalResetAt(parsed.meta?.operationalResetAt),
+        operationalResetAt: "", // Clear operational reset to prevent data loss
         realtimeAuditResetAt: normalizeIsoTimestamp(parsed.meta?.realtimeAuditResetAt),
         [FINAL_CLIENT_PREP_FLAG]: parsed.meta?.[FINAL_CLIENT_PREP_FLAG] === true,
         [FINAL_CLIENT_PREP_MARKER]:
@@ -1835,11 +1823,13 @@
       cash: { ...fallback.cash, ...(parsed.cash || {}) },
       session: { userId: parsed.session?.userId || null }
     };
+    console.log("[normalizeStateShape] After initial normalization, openComandas count:", normalized.openComandas?.length);
     normalized.meta.deletedUserIds = sanitizeDeletedUserIds(normalized.meta.deletedUserIds, normalized);
     normalized.meta.deletedProductIds = sanitizeDeletedProductIds(normalized.meta.deletedProductIds, normalized);
 
     ensureSystemUsers(normalized);
     const recovered = applyCatalogBackupRecovery(normalized);
+    console.log("[normalizeStateShape] After applyCatalogBackupRecovery, openComandas count:", recovered.openComandas?.length);
     recovered.seq = recovered.seq || normalized.seq || {};
     recovered.meta = recovered.meta || {};
     recovered.meta.deletedUserIds = sanitizeDeletedUserIds(recovered.meta.deletedUserIds, normalized, recovered);
@@ -1848,9 +1838,13 @@
     applyEduardoCredentialRecovery(recovered);
     purgeSystemTestArtifacts(recovered);
     applyFinalClientPreparation(recovered);
+    console.log("[normalizeStateShape] Before applyOperationalResetCutoff, openComandas count:", recovered.openComandas?.length);
     applyOperationalResetCutoff(recovered, recovered.meta?.operationalResetAt);
+    console.log("[normalizeStateShape] After applyOperationalResetCutoff, openComandas count:", recovered.openComandas?.length);
     applyRealtimeAuditCutoff(recovered, recovered.meta?.realtimeAuditResetAt);
+    console.log("[normalizeStateShape] Before sanitizeOperationalComandasAgainstHistory, openComandas count:", recovered.openComandas?.length);
     sanitizeOperationalComandasAgainstHistory(recovered);
+    console.log("[normalizeStateShape] After sanitizeOperationalComandasAgainstHistory, openComandas count:", recovered.openComandas?.length);
     recomputeComandaSequence(recovered);
     ensureCatalogBackup(recovered, "normalize");
     pruneHistory(recovered);
@@ -1858,22 +1852,31 @@
     pruneCashHtmlReports(recovered);
     pruneInternalCashAudits(recovered);
     pruneFinanceCycleReports(recovered);
+    console.log("[normalizeStateShape] Final openComandas count:", recovered.openComandas?.length);
     return recovered;
   }
 
   function loadState() {
+    console.log("[loadState] Starting load");
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
+      console.log("[loadState] No existing state found, using initial");
       const first = initialState();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(first));
       return first;
     }
 
     try {
-      const merged = normalizeStateShape(JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      console.log("[loadState] Loaded from localStorage, openComandas count:", parsed.openComandas?.length);
+      console.log("[loadState] Loaded from localStorage, parsed.openComandas:", parsed.openComandas);
+      const merged = normalizeStateShape(parsed);
+      console.log("[loadState] After normalizeStateShape, openComandas count:", merged.openComandas?.length);
+      console.log("[loadState] After normalizeStateShape, merged.openComandas:", merged.openComandas);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       return merged;
     } catch (_err) {
+      console.error("[loadState] Error loading state, using initial:", _err);
       const clean = initialState();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
       return clean;
@@ -2116,6 +2119,22 @@
     supabaseCtx.channel.send({ type: "broadcast", event: "kitchen_order_upsert", payload }).catch(() => { });
   }
 
+  function publishComandaUpsert(comanda, items, actor, reason = "Comanda atualizada") {
+    if (!supabaseCtx.channel || !comanda) return;
+    const payload = {
+      sessionId: clientSessionId,
+      broadcastAt: isoNow(),
+      updatedAt: normalizeIsoTimestamp(state.meta?.updatedAt) || isoNow(),
+      reason,
+      actorId: actor?.id ?? null,
+      actorRole: String(actor?.role || ""),
+      actorName: String(actor?.name || ""),
+      comanda: cloneRealtimePayload(comanda),
+      itemIds: (Array.isArray(items) ? items : []).map((item) => String(item.id || "")).filter(Boolean)
+    };
+    supabaseCtx.channel.send({ type: "broadcast", event: "comanda_upsert", payload }).catch(() => { });
+  }
+
   function mergeRealtimeItems(existingItems, incomingItems) {
     const itemMap = new Map();
     for (const item of Array.isArray(existingItems) ? existingItems : []) {
@@ -2150,6 +2169,29 @@
         ...incoming,
         items: mergeRealtimeItems(existing.items, incoming.items),
         events: mergeAuditRows(existing.events, incoming.events).sort((a, b) => new Date(a?.ts || 0) - new Date(b?.ts || 0))
+      };
+    } else {
+      state.openComandas = [...openRows, incoming];
+    }
+    saveState({ skipCloud: true, touchMeta: false });
+    return true;
+  }
+
+  function applyComandaUpsert(payload) {
+    if (!payload || payload.sessionId === clientSessionId) return false;
+    const incoming = payload.comanda;
+    const comandaId = String(incoming?.id || "").trim();
+    if (!comandaId) return false;
+
+    const openRows = Array.isArray(state.openComandas) ? state.openComandas : [];
+    const existingIndex = openRows.findIndex((comanda) => String(comanda?.id || "").trim() === comandaId);
+    if (existingIndex >= 0) {
+      const existing = openRows[existingIndex];
+      openRows[existingIndex] = {
+        ...existing,
+        ...incoming,
+        items: Array.isArray(incoming.items) ? mergeRealtimeItems(existing.items, incoming.items) : existing.items,
+        events: Array.isArray(incoming.events) ? mergeAuditRows(existing.events, incoming.events).sort((a, b) => new Date(a?.ts || 0) - new Date(b?.ts || 0)) : existing.events
       };
     } else {
       state.openComandas = [...openRows, incoming];
@@ -2391,6 +2433,7 @@
   }
 
   async function pullStateFromSupabase() {
+    console.log("[pullStateFromSupabase] Starting, current local openComandas count:", state.openComandas?.length);
     const client = getSupabaseClient();
     if (!client) return;
     if (supabaseCtx.pullInFlight) {
@@ -2402,7 +2445,10 @@
 
     try {
       const { data, error } = await client.from("restobar_state").select("payload,updated_at").eq("id", "main").maybeSingle();
-      if (error || !data?.payload) return;
+      if (error || !data?.payload) {
+        console.log("[pullStateFromSupabase] No data or error, returning", error);
+        return;
+      }
       if (typeof data.payload !== "object" || Array.isArray(data.payload)) {
         console.warn("[pullStateFromSupabase] Payload remoto invalido, ignorando.");
         return;
@@ -2416,20 +2462,26 @@
       const remoteUpdated = remoteMetaUpdated || (!localUpdated ? parseUpdatedAtTimestamp(data.updated_at) : 0);
       const localFootprint = stateFootprint(state);
       const remoteFootprint = stateFootprint(data.payload);
+      console.log("[pullStateFromSupabase] remoteFootprint.openComandas:", remoteFootprint.openComandas);
+      console.log("[pullStateFromSupabase] data.payload.openComandas:", data.payload.openComandas);
       const localLooksReset = isLikelyResetState(state);
       const remoteHasMoreData =
         remoteFootprint.catalogRows > localFootprint.catalogRows ||
         remoteFootprint.operationalRows > localFootprint.operationalRows;
       const shouldPull = (Number.isFinite(remoteUpdated) && remoteUpdated > localUpdated) || (localLooksReset && remoteHasMoreData);
+      console.log("[pullStateFromSupabase] shouldPull:", shouldPull, "remoteUpdated:", remoteUpdated, "localUpdated:", localUpdated);
       if (shouldPull) {
         if (shouldForceRemotePreference(data.payload, state)) {
           setSupabaseStatus("aviso", "Pull remoto ignorado para evitar sobrescrita destrutiva do historico local.");
           return;
         }
+        console.log("[pullStateFromSupabase] Merging states");
         const incomingMerged = mergeStateForCloud(state, data.payload);
+        console.log("[pullStateFromSupabase] After mergeStateForCloud, incomingMerged.openComandas count:", incomingMerged.openComandas?.length);
         const incomingRecovered = applyCatalogBackupRecovery(incomingMerged, state, data.payload);
         ensureCatalogBackup(incomingRecovered, "pull");
         adoptIncomingState(incomingRecovered);
+        console.log("[pullStateFromSupabase] After adoptIncomingState, state.openComandas count:", state.openComandas?.length);
         state.meta.lastCloudSyncAt = isoNow();
         saveState({ skipCloud: true, touchMeta: false });
         render();
@@ -2439,6 +2491,7 @@
       }
       setSupabaseStatus("conectado");
     } catch (err) {
+      console.error("[pullStateFromSupabase] Error:", err);
       setSupabaseStatus("aviso", String(err?.message || err || "Falha ao ler cloud."));
     } finally {
       supabaseCtx.pullInFlight = false;
@@ -2461,7 +2514,7 @@
       const knownTs = parseUpdatedAtTimestamp(supabaseCtx.lastKnownRemoteUpdatedAt);
       const localTs = parseUpdatedAtTimestamp(state.meta?.updatedAt);
       if (observedTs > Math.max(knownTs, localTs)) {
-        debouncedPullFromSupabase();
+        debouncedRemotePullFromSupabase();
       }
     } catch (_err) { }
   }
@@ -2600,7 +2653,7 @@
       })
       .on("broadcast", { event: "state_changed" }, (message) => {
         rememberObservedRemoteUpdatedAt(message?.payload?.updatedAt);
-        debouncedRemotePullFromSupabase();
+        void pullStateFromSupabase(); // Call immediately, no debounce
       })
       .on("broadcast", { event: "kitchen_order_upsert" }, (message) => {
         if (applyKitchenOrderUpsert(message?.payload)) {
@@ -2608,7 +2661,29 @@
         }
         rememberObservedRemoteUpdatedAt(message?.payload?.updatedAt);
         debouncedRemotePullFromSupabase();
-      });
+      })
+      .on("broadcast", { event: "comanda_upsert" }, (message) => {
+        if (applyComandaUpsert(message?.payload)) {
+          render();
+        }
+        rememberObservedRemoteUpdatedAt(message?.payload?.updatedAt);
+        debouncedRemotePullFromSupabase();
+      })
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "restobar_state",
+          filter: "id=eq.main"
+        },
+        (payload) => {
+          if (payload?.new?.updated_at) {
+            rememberObservedRemoteUpdatedAt(payload.new.updated_at);
+            debouncedRemotePullFromSupabase();
+          }
+        }
+      );
 
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
@@ -2848,23 +2923,16 @@
 
   function canActorAccessComanda(actor, comanda) {
     if (!comanda) return false;
-    if (!actor || actor.role !== "waiter") return true;
-    const actorId = String(actor.id ?? "").trim();
-    if (!actorId) return false;
-    return comandaOwnerId(comanda) === actorId;
+    return true;
   }
 
   function listOpenComandasForActor(actor = getCurrentUser()) {
     if (!actor) return [];
-    if (actor.role !== "waiter") return state.openComandas;
-    return state.openComandas.filter((comanda) => canActorAccessComanda(actor, comanda));
+    return state.openComandas;
   }
 
   function listFinalizedComandasForActor(actor = getCurrentUser()) {
-    const commandas = state.closedComandas.filter((comanda) => String(comanda?.status || "") === "finalizada");
-    if (!actor) return [];
-    if (actor.role !== "waiter") return commandas;
-    return commandas.filter((comanda) => canActorAccessComanda(actor, comanda));
+    return state.closedComandas.filter((comanda) => String(comanda?.status || "") === "finalizada");
   }
 
   function findOpenComandaForActor(id, actor = currentActor(), options = {}) {
@@ -4223,6 +4291,11 @@
     const printedBy = options.printedBy || currentActor();
     const title = options.title || `Historico do caixa ${cashId}`;
     const subtitle = options.subtitle || "Extrato do dia";
+    const pageSize = "A4 portrait";
+    const paperWidthMm = 210;
+    // #region debug-point C:cash-history-html-entry
+    fetch("http://127.0.0.1:7777/event", { method: "POST", body: JSON.stringify({ sessionId: "close-cashier-error", runId: "pre-fix", hypothesisId: "C", location: "app.js:buildCashHistoryPrintHtml", msg: "[DEBUG] buildCashHistoryPrintHtml entry", data: { cashId, reportId, commandasCount: ordered.length, openedAt, closedAt, typeofPageSize: typeof pageSize, typeofPaperWidthMm: typeof paperWidthMm }, ts: Date.now() }) }).catch(() => { });
+    // #endregion
     const totals = { soldQty: 0, soldValue: 0, soldCost: 0, returnedQty: 0, returnedValue: 0 };
     const categoryMap = new Map();
     const waiterMap = new Map();
@@ -4306,7 +4379,7 @@
       perdas: totals.returnedValue,
       lucroLiquido: summary.total - totals.soldCost - totals.returnedValue
     };
-    return `<html><head><title>Extrato ${esc(cashId)}</title><style>@page{size:${pageSize};margin:4mm}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Arial,sans-serif;color:#12253f;background:#f4f7fb;font-size:10px}.report{max-width:${paperWidthMm}mm;margin:0 auto;padding:6px}.card,.section,.header{background:#fff;border:1px solid #dbe4f0;border-radius:10px}.header{padding:10px}.header h1{margin:0;font-size:16px}.header p{margin:4px 0 0;font-size:11px;color:#556a86}.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:10px}.card{padding:8px}.k{font-size:9px;text-transform:uppercase;color:#667a96}.v{margin-top:6px;font-size:15px;font-weight:700}.section{padding:10px;margin-top:10px}.section h2{margin:0 0 8px;font-size:14px}.note{margin:0 0 8px;font-size:10px;color:#667a96}.two{display:grid;grid-template-columns:1fr;gap:8px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{padding:5px 4px;border-bottom:1px solid #e7eef7;text-align:left;vertical-align:top}th{font-size:9px;text-transform:uppercase;color:#5d6f88}.right{text-align:right}.center{text-align:center}.acc{border:1px solid #dbe4f0;border-radius:8px;margin-bottom:8px;overflow:hidden}.acc summary{display:flex;justify-content:space-between;gap:6px;padding:8px 10px;background:#f5f9ff;list-style:none;font-size:11px}.acc summary::-webkit-details-marker{display:none}@media(max-width:900px){.summary{grid-template-columns:repeat(1,minmax(0,1fr))}.two{grid-template-columns:1fr}}@media print{body{background:#fff}.report{max-width:none;padding:0}.card,.section,.header,.acc{break-inside:avoid;page-break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="report"><div class="header"><h1>${esc(ESTABLISHMENT_NAME)}</h1><p><b>${esc(title)}</b></p><p>${esc(subtitle)}</p><p>Caixa <b>${esc(cashId)}</b> | Registro <b>${esc(reportId)}</b> | Abertura efetiva ${esc(formatCashOpenedAtLabel(openedAt))} | Fechamento ${esc(formatDateTimeWithDay(closedAt))} | Impresso por ${esc(printedBy?.name || "Sistema")} (${esc(roleLabel(printedBy?.role || "system"))})</p><div class="summary"><div class="card"><div class="k">Total Vendido</div><div class="v">${money(summary.total)}</div></div><div class="card"><div class="k">Recebido no Caixa</div><div class="v">${money(paymentTotals.pix + paymentTotals.cartao + paymentTotals.dinheiro + paymentTotals.outros)}</div></div><div class="card"><div class="k">Comandas</div><div class="v">${summary.commandasCount}</div></div><div class="card"><div class="k">Ticket Medio</div><div class="v">${money(summary.commandasCount ? summary.total / summary.commandasCount : 0)}</div></div><div class="card"><div class="k">Itens Vendidos</div><div class="v">${parseNumber(totals.soldQty)}</div></div><div class="card"><div class="k">Devolvidos/Excluidos</div><div class="v">${parseNumber(totals.returnedQty)}</div></div></div></div><div class="section"><h2>Itens Vendidos por Categoria</h2><p class="note">Categorias existentes com agrupamento por item.</p>${categoryCards || `<p class="note">Sem itens vendidos no periodo.</p>`}</div><div class="section"><h2>Performance por Garcom</h2><p class="note">Total de vendas e valor efetivamente recebido (sem fiado).</p><table><thead><tr><th>Garcom</th><th class="center">Comandas</th><th class="right">Vendido</th><th class="right">Recebido</th></tr></thead><tbody>${waiterRows || `<tr><td colspan="4">Sem comandas registradas por garcom.</td></tr>`}</tbody></table></div><div class="section"><h2>Financeiro</h2><div class="two"><div><p class="note">Resumo por forma de pagamento.</p><table><thead><tr><th>Metodo</th><th class="right">Total</th></tr></thead><tbody><tr><td>Pix</td><td class="right">${money(paymentTotals.pix)}</td></tr><tr><td>Cartao</td><td class="right">${money(paymentTotals.cartao)}</td></tr><tr><td>Dinheiro</td><td class="right">${money(paymentTotals.dinheiro)}</td></tr><tr><td>Fiado</td><td class="right">${money(paymentTotals.fiado)}</td></tr><tr><td>Outros</td><td class="right">${money(paymentTotals.outros)}</td></tr></tbody></table></div><div><p class="note">Lucro bruto x liquido (estimado pelo CMV cadastrado).</p><table><tbody><tr><th>Faturamento Bruto</th><td class="right">${money(financeiro.bruto)}</td></tr><tr><th>CMV</th><td class="right">${money(financeiro.cmv)}</td></tr><tr><th>Lucro Bruto</th><td class="right">${money(financeiro.lucroBruto)}</td></tr><tr><th>Perdas</th><td class="right">${money(financeiro.perdas)}</td></tr><tr><th>Lucro Liquido</th><td class="right">${money(financeiro.lucroLiquido)}</td></tr></tbody></table></div></div></div><div class="section"><h2>Comandas do Periodo</h2><p class="note">Uma linha por comanda (sem repeticao de item).</p><table><thead><tr><th>Comanda</th><th>Criada</th><th>Fechada</th><th>Garcom</th><th>Mesa/ref</th><th>Cliente</th><th>Status</th><th class="right">Total</th><th>Pagamento</th></tr></thead><tbody>${comandaRows || `<tr><td colspan="9">Sem comandas no periodo.</td></tr>`}</tbody></table></div></div></body></html>`;
+    return `<html><head><title>Extrato ${esc(cashId)}</title><style>@page{size:${pageSize};margin:2mm}*{box-sizing:border-box}body{margin:0;font-family:"Segoe UI",Arial,sans-serif;color:#12253f;background:#f4f7fb;font-size:10px}.report{max-width:${paperWidthMm}mm;margin:0 auto;padding:3px}.card,.section,.header{background:#fff;border:1px solid #dbe4f0;border-radius:10px}.header{padding:8px}.header h1{margin:0;font-size:16px}.header p{margin:3px 0 0;font-size:11px;color:#556a86}.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:7px}.card{padding:7px}.k{font-size:9px;text-transform:uppercase;color:#667a96}.v{margin-top:4px;font-size:15px;font-weight:700}.section{padding:8px;margin-top:7px}.section h2{margin:0 0 6px;font-size:14px}.note{margin:0 0 6px;font-size:10px;color:#667a96}.two{display:grid;grid-template-columns:1fr;gap:6px}table{width:100%;border-collapse:collapse;font-size:10px}th,td{padding:4px 3px;border-bottom:1px solid #e7eef7;text-align:left;vertical-align:top}th{font-size:9px;text-transform:uppercase;color:#5d6f88}.right{text-align:right}.center{text-align:center}.acc{border:1px solid #dbe4f0;border-radius:8px;margin-bottom:6px;overflow:hidden}.acc summary{display:flex;justify-content:space-between;gap:6px;padding:6px 8px;background:#f5f9ff;list-style:none;font-size:11px}.acc summary::-webkit-details-marker{display:none}@media(max-width:900px){.summary{grid-template-columns:repeat(1,minmax(0,1fr))}.two{grid-template-columns:1fr}}@media print{body{background:#fff}.report{max-width:none;padding:0}.card,.section,.header,.acc{break-inside:avoid;page-break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="report"><div class="header"><h1>${esc(ESTABLISHMENT_NAME)}</h1><p><b>${esc(title)}</b></p><p>${esc(subtitle)}</p><p>Caixa <b>${esc(cashId)}</b> | Registro <b>${esc(reportId)}</b> | Abertura efetiva ${esc(formatCashOpenedAtLabel(openedAt))} | Fechamento ${esc(formatDateTimeWithDay(closedAt))} | Impresso por ${esc(printedBy?.name || "Sistema")} (${esc(roleLabel(printedBy?.role || "system"))})</p><div class="summary"><div class="card"><div class="k">Total Vendido</div><div class="v">${money(summary.total)}</div></div><div class="card"><div class="k">Recebido no Caixa</div><div class="v">${money(paymentTotals.pix + paymentTotals.cartao + paymentTotals.dinheiro + paymentTotals.outros)}</div></div><div class="card"><div class="k">Comandas</div><div class="v">${summary.commandasCount}</div></div><div class="card"><div class="k">Ticket Medio</div><div class="v">${money(summary.commandasCount ? summary.total / summary.commandasCount : 0)}</div></div><div class="card"><div class="k">Itens Vendidos</div><div class="v">${parseNumber(totals.soldQty)}</div></div><div class="card"><div class="k">Devolvidos/Excluidos</div><div class="v">${parseNumber(totals.returnedQty)}</div></div></div></div><div class="section"><h2>Itens Vendidos por Categoria</h2><p class="note">Categorias existentes com agrupamento por item.</p>${categoryCards || `<p class="note">Sem itens vendidos no periodo.</p>`}</div><div class="section"><h2>Performance por Garcom</h2><p class="note">Total de vendas e valor efetivamente recebido (sem fiado).</p><table><thead><tr><th>Garcom</th><th class="center">Comandas</th><th class="right">Vendido</th><th class="right">Recebido</th></tr></thead><tbody>${waiterRows || `<tr><td colspan="4">Sem comandas registradas por garcom.</td></tr>`}</tbody></table></div><div class="section"><h2>Financeiro</h2><div class="two"><div><p class="note">Resumo por forma de pagamento.</p><table><thead><tr><th>Metodo</th><th class="right">Total</th></tr></thead><tbody><tr><td>Pix</td><td class="right">${money(paymentTotals.pix)}</td></tr><tr><td>Cartao</td><td class="right">${money(paymentTotals.cartao)}</td></tr><tr><td>Dinheiro</td><td class="right">${money(paymentTotals.dinheiro)}</td></tr><tr><td>Fiado</td><td class="right">${money(paymentTotals.fiado)}</td></tr><tr><td>Outros</td><td class="right">${money(paymentTotals.outros)}</td></tr></tbody></table></div><div><p class="note">Lucro bruto x liquido (estimado pelo CMV cadastrado).</p><table><tbody><tr><th>Faturamento Bruto</th><td class="right">${money(financeiro.bruto)}</td></tr><tr><th>CMV</th><td class="right">${money(financeiro.cmv)}</td></tr><tr><th>Lucro Bruto</th><td class="right">${money(financeiro.lucroBruto)}</td></tr><tr><th>Perdas</th><td class="right">${money(financeiro.perdas)}</td></tr><tr><th>Lucro Liquido</th><td class="right">${money(financeiro.lucroLiquido)}</td></tr></tbody></table></div></div></div><div class="section"><h2>Comandas do Periodo</h2><p class="note">Uma linha por comanda (sem repeticao de item).</p><table><thead><tr><th>Comanda</th><th>Criada</th><th>Fechada</th><th>Garcom</th><th>Mesa/ref</th><th>Cliente</th><th>Status</th><th class="right">Total</th><th>Pagamento</th></tr></thead><tbody>${comandaRows || `<tr><td colspan="9">Sem comandas no periodo.</td></tr>`}</tbody></table></div></div></body></html>`;
   }
 
   function createCashHtmlReportRecord(closure, actor, html, options = {}) {
@@ -4337,14 +4410,11 @@
       alert("HTML de fechamento indisponivel para visualizacao.");
       return;
     }
-    const previewTitle = options.previewTitle || report.title || `HTML de fechamento ${report.cashId || ""}`.trim();
-    const previewSubtitle =
-      options.previewSubtitle ||
-      `Salvo em ${formatDateTimeWithDay(report.createdAt || report.closedAt || isoNow())} | Caixa ${report.cashId || "-"}`;
-    openReceiptPopup(report.html, "Permita pop-up para abrir o HTML salvo do fechamento.", "width=980,height=860", {
-      previewTitle,
-      previewSubtitle
-    });
+    uiState.cashHtmlViewerReportId = String(report.id || "");
+    const actor = currentActor();
+    if (actor?.role === "admin") uiState.adminTab = "arquivos_html";
+    if (actor?.role === "dev") uiState.devTab = "arquivos_html";
+    render();
   }
 
 
@@ -4360,6 +4430,106 @@
     });
   }
 
+  function closeStoredCashHtmlReportViewer() {
+    uiState.cashHtmlViewerReportId = "";
+    render();
+  }
+
+  function findStoredCashClosureForReport(reportId) {
+    const report = (state.cashHtmlReports || []).find((entry) => String(entry.id) === String(reportId));
+    if (!report) return null;
+    return (state.history90 || []).find((closure) => String(closure.id || "") === String(report.cashClosureId || "")) || null;
+  }
+
+  function buildCashClosureCompactReceiptLines(closure) {
+    const commandas = dedupeComandasById(Array.isArray(closure?.commandas) ? closure.commandas : []);
+    const summary = closure?.summary || buildCashSummary(commandas);
+    const paymentRows = Object.entries(summary.byPayment || {})
+      .map(([method, amount]) => ({ method: String(method || ""), amount: Math.max(0, parseNumber(amount || 0)) }))
+      .filter((row) => row.amount > 0);
+    const products = new Map();
+    let returnedValue = 0;
+
+    for (const comanda of commandas) {
+      const returns = computeComandaSaleAndReturns(comanda);
+      returnedValue += parseNumber(returns.returnedValue || 0);
+      for (const item of comanda.items || []) {
+        if (!itemCountsForTotal(item) || item?.canceled) continue;
+        const qty = parseNumber(item?.qty || 0);
+        if (!(qty > 0)) continue;
+        const name = String(item?.name || "Item").trim() || "Item";
+        const revenue = qty * parseNumber(item?.priceAtSale || 0);
+        const current = products.get(name) || { qty: 0, revenue: 0 };
+        current.qty += qty;
+        current.revenue += revenue;
+        products.set(name, current);
+      }
+    }
+
+    const productLines = [...products.entries()]
+      .sort((a, b) => Number(b[1]?.revenue || 0) - Number(a[1]?.revenue || 0))
+      .map(([name, row]) => `${parseNumber(row.qty || 0)}x ${name} - ${money(row.revenue || 0)}`);
+
+    return [
+      `Caixa: ${String(closure?.cashId || "-")}`,
+      `Registro: ${String(closure?.id || "-")}`,
+      `Abertura: ${formatDateTimeWithDay(closure?.openedAt || "-")}`,
+      `Fechamento: ${formatDateTimeWithDay(closure?.closedAt || "-")}`,
+      `Comandas: ${summary.commandasCount}`,
+      `Faturamento: ${money(summary.total || 0)}`,
+      `Devolucoes: ${money(returnedValue)}`,
+      paymentRows.length ? "--- CONTABIL ---" : "",
+      ...paymentRows.map((row) => `${paymentLabel(row.method)}: ${money(row.amount)}`),
+      productLines.length ? "--- PRODUTOS VENDIDOS ---" : "Sem produtos vendidos.",
+      ...productLines
+    ].filter(Boolean);
+  }
+
+  function buildCashClosureCompactReceiptHtml(closure) {
+    return buildThermalReceiptHtml({
+      title: `HISTORICO ${String(closure?.cashId || "").trim() || "CAIXA"}`,
+      lines: buildCashClosureCompactReceiptLines(closure),
+      footer: "Resumo simples para conferencia contabil."
+    });
+  }
+
+  function buildCashClosureCompactReceiptText(closure) {
+    return [
+      `=== HISTORICO ${String(closure?.cashId || "CAIXA")} ===`,
+      ...buildCashClosureCompactReceiptLines(closure),
+      "Resumo simples para conferencia contabil.",
+      `Gerado em: ${formatDateTime(isoNow())}`,
+      "\n"
+    ].join("\n");
+  }
+
+  async function printStoredCashHtmlReportCompact(reportId) {
+    const closure = findStoredCashClosureForReport(reportId);
+    if (!closure) {
+      alert("Historico do fechamento nao encontrado para impressao.");
+      return;
+    }
+    const html = buildCashClosureCompactReceiptHtml(closure);
+    const receiptText = buildCashClosureCompactReceiptText(closure);
+    if (isAndroidDevice()) {
+      imprimirCupomIntent(receiptText);
+      return;
+    }
+    if (uiState.printerPrefs?.receiptDirectEnabled) {
+      try {
+        await printReceiptViaQz(html, closure.id || reportId);
+        return;
+      } catch (err) {
+        alert(`Nao foi possivel imprimir o historico: ${String(err?.message || err)}\n\nConfira a MTP-II e o QZ Tray nesta maquina.`);
+        return;
+      }
+    }
+    openReceiptPopup(html, "Permita pop-up para abrir a impressao do historico.", "width=430,height=820", {
+      previewTitle: `Historico ${closure.cashId || closure.id || "-"}`,
+      previewSubtitle: "Cupom simples 58 mm para conferencia contabil"
+    });
+  }
+
   function ensureLatestCashClosureHtmlReport() {
     const closures = Array.isArray(state.history90) ? state.history90 : [];
     if (!closures.length) return false;
@@ -4372,12 +4542,12 @@
 
     const reportOptions = {
       printedBy: { id: 0, role: "system", name: "Sistema" },
-      title: `Fechamento do caixa ${latestClosure.cashId || latestClosure.id || "-"} | Dia ${formatDateOnlySafe(
+      title: `Fechamento detalhado do caixa ${latestClosure.cashId || latestClosure.id || "-"} | Dia ${formatDateOnlySafe(
         String(latestClosure.openedAt || latestClosure.closedAt || isoNow()).slice(0, 10)
       )}`,
-      subtitle: "HTML restaurado automaticamente do ultimo fechamento"
+      subtitle: "Historico detalhado restaurado automaticamente do ultimo fechamento"
     };
-    const html = buildCashHistoryPrintHtml(latestClosure, reportOptions);
+    const html = buildCashHistoryExtendedHtml(latestClosure, reportOptions);
     const report = createCashHtmlReportRecord(latestClosure, reportOptions.printedBy, html, reportOptions);
     state.cashHtmlReports = [report, ...(state.cashHtmlReports || [])];
     pruneCashHtmlReports(state);
@@ -4395,6 +4565,23 @@
       previewTitle: "Historico do caixa",
       previewSubtitle: "Modo visualizacao simples (impressao desativada)"
     });
+  }
+
+  function buildCashHistoryExtendedHtml(closure, options = {}) {
+    const baseHtml = buildCashHistoryPrintHtml(closure, options);
+    const auditEvents = dedupeAuditEvents([...(closure?.auditLog || [])]).sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0));
+    const auditRows = auditEvents.length
+      ? auditEvents.map((e) => `<tr><td>${esc(formatDateTime(e.ts))}</td><td>${esc(e.actorName || "-")} (${esc(roleLabel(e.actorRole || "-"))})</td><td>${esc(eventTypeLabel(e.type || "-"))}</td><td>${esc(displayComandaId(e.comandaId || "-"))}</td><td>${esc(maskComandaCodesInText(e.detail || "-"))}</td></tr>`).join("")
+      : `<tr><td colspan="5">Sem eventos registrados para este caixa.</td></tr>`;
+    const auditSection = `
+      <h2>Registro completo de alteracoes arquivadas</h2>
+      <p class="small">Inclui todas as acoes de administradores, garcons e cozinheiros registradas durante o turno deste caixa.</p>
+      <table>
+        <thead><tr><th>Data/Hora</th><th>Quem</th><th>Tipo</th><th>Comanda</th><th>Detalhe</th></tr></thead>
+        <tbody>${auditRows}</tbody>
+      </table>
+    `;
+    return baseHtml.replace("</body>", `${auditSection}</div></body>`).replace("</div></div></body>", "</div></body>");
   }
 
   function printCurrentCashHistoryReport() {
@@ -4438,24 +4625,11 @@
       summary: draft.summary,
       auditLog: state.auditLog
     };
-    const baseHtml = buildCashHistoryPrintHtml(preview, {
+    const extendedHtml = buildCashHistoryExtendedHtml(preview, {
       printedBy: actor,
       title: `Histórico detalhado do dia - Caixa ${state.cash.id}`,
       subtitle: "Relatório completo com todas as alterações do dia"
     });
-    const auditEvents = dedupeAuditEvents([...state.auditLog]).sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0));
-    const auditRows = auditEvents.length
-      ? auditEvents.map((e) => `<tr><td>${esc(formatDateTime(e.ts))}</td><td>${esc(e.actorName || "-")} (${esc(roleLabel(e.actorRole || "-"))})</td><td>${esc(eventTypeLabel(e.type || "-"))}</td><td>${esc(displayComandaId(e.comandaId || "-"))}</td><td>${esc(maskComandaCodesInText(e.detail || "-"))}</td></tr>`).join("")
-      : `<tr><td colspan="5">Sem eventos registrados.</td></tr>`;
-    const auditSection = `
-      <h2>Registro completo de alteracoes do dia</h2>
-      <p class="small">Inclui todas as acoes de administradores, garcons e cozinheiros registradas durante o caixa.</p>
-      <table>
-        <thead><tr><th>Data/Hora</th><th>Quem</th><th>Tipo</th><th>Comanda</th><th>Detalhe</th></tr></thead>
-        <tbody>${auditRows}</tbody>
-      </table>
-    `;
-    const extendedHtml = baseHtml.replace("</body>", `${auditSection}</div></body>`).replace("</div></div></body>", "</div></body>");
     openReceiptPopup(extendedHtml, "Permita pop-up para abrir o histórico estendido.", "width=1100,height=900", {
       previewTitle: `Histórico estendido - Caixa ${state.cash.id}`,
       previewSubtitle: "Relatório completo com todas as alterações"
@@ -4491,20 +4665,7 @@
       title: `Fechamento ESTENDIDO ${closure.cashId || closure.id}`,
       subtitle: `Registro detalhado com log completo - ${closure.id}`
     };
-    const baseHtml = buildCashHistoryPrintHtml(closure, reportOptions);
-    const auditEvents = dedupeAuditEvents([...(closure.auditLog || [])]).sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0));
-    const auditRows = auditEvents.length
-      ? auditEvents.map((e) => `<tr><td>${esc(formatDateTime(e.ts))}</td><td>${esc(e.actorName || "-")} (${esc(roleLabel(e.actorRole || "-"))})</td><td>${esc(eventTypeLabel(e.type || "-"))}</td><td>${esc(displayComandaId(e.comandaId || "-"))}</td><td>${esc(maskComandaCodesInText(e.detail || "-"))}</td></tr>`).join("")
-      : `<tr><td colspan="5">Sem eventos registrados para este caixa.</td></tr>`;
-    const auditSection = `
-      <h2>Registro completo de alteracoes arquivadas</h2>
-      <p class="small">Inclui todas as acoes de administradores, garcons e cozinheiros registradas durante o turno deste caixa.</p>
-      <table>
-        <thead><tr><th>Data/Hora</th><th>Quem</th><th>Tipo</th><th>Comanda</th><th>Detalhe</th></tr></thead>
-        <tbody>${auditRows}</tbody>
-      </table>
-    `;
-    const extendedHtml = baseHtml.replace("</body>", `${auditSection}</div></body>`).replace("</div></div></body>", "</div></body>");
+    const extendedHtml = buildCashHistoryExtendedHtml(closure, reportOptions);
     openReceiptPopup(extendedHtml, "Permita pop-up para abrir o historico estendido.", "width=1100,height=900", {
       previewTitle: reportOptions.title,
       previewSubtitle: reportOptions.subtitle
@@ -5092,7 +5253,7 @@
             <button type="button" class="btn secondary" data-action="print-cash-day-history">Ver histórico do dia</button>
             <button type="button" class="btn secondary" data-action="print-cash-day-history-extended">Ver histórico do dia detalhado</button>
           </div>
-          <p class="note" style="margin-top:0.35rem;">Relatorio simples: resumo do caixa, pagamentos e comandas do dia. No fechamento, o HTML do relatorio e arquivado automaticamente.</p>
+          <p class="note" style="margin-top:0.35rem;">No fechamento, o historico detalhado do caixa e salvo automaticamente em HTML e fica disponivel para consulta por 30 dias.</p>
         </div>
       </div>
     `;
@@ -5103,19 +5264,36 @@
     const reports = (state.cashHtmlReports || [])
       .map((entry, idx) => normalizeCashHtmlReportRecord(entry, idx))
       .sort((a, b) => new Date(b.closedAt || b.createdAt || 0) - new Date(a.closedAt || a.createdAt || 0));
+    const selectedReport = reports.find((entry) => String(entry.id) === String(uiState.cashHtmlViewerReportId || "")) || null;
 
     return `
       <div class="card">
         <h3>Arquivos HTML de Fechamento</h3>
-        <p class="note">Cada fechamento de caixa gera um HTML igual ao relatorio que iria para impressao. Esses arquivos ficam salvos no sistema e sincronizados via Supabase.</p>
+        <p class="note">Cada fechamento de caixa gera um HTML detalhado com o resumo e o log completo do turno. Esses arquivos ficam salvos no sistema por 30 dias e sincronizados via Supabase.</p>
         ${reports.length
         ? `<div class="table-wrap" style="margin-top:0.75rem;"><table class="history-table"><thead><tr><th>Arquivo</th><th>Dia referencia</th><th>Caixa</th><th>Fechado em</th><th>Salvo em</th><th>Responsavel</th><th>Acoes</th></tr></thead><tbody>${reports
           .map(
             (report) =>
-              `<tr><td>${esc(report.id)}</td><td>${esc(formatDateOnlySafe(report.referenceDay || report.openedAt || report.closedAt || report.createdAt || isoNow()))}</td><td>${esc(report.cashId || "-")}</td><td>${esc(formatDateTimeWithDay(report.closedAt || report.createdAt))}</td><td>${esc(formatDateTimeWithDay(report.createdAt || report.closedAt))}</td><td>${esc(report.createdByName || "-")} (${esc(roleLabel(report.createdByRole || "-"))})</td><td><div class="actions"><button class="btn secondary" data-action="open-cash-html-report" data-id="${esc(report.id)}">Abrir em nova aba</button></div></td></tr>`
+              `<tr><td>${esc(report.id)}</td><td>${esc(formatDateOnlySafe(report.referenceDay || report.openedAt || report.closedAt || report.createdAt || isoNow()))}</td><td>${esc(report.cashId || "-")}</td><td>${esc(formatDateTimeWithDay(report.closedAt || report.createdAt))}</td><td>${esc(formatDateTimeWithDay(report.createdAt || report.closedAt))}</td><td>${esc(report.createdByName || "-")} (${esc(roleLabel(report.createdByRole || "-"))})</td><td><div class="actions"><button class="btn ${selectedReport?.id === report.id ? "primary" : "secondary"}" data-action="open-cash-html-report" data-id="${esc(report.id)}">${selectedReport?.id === report.id ? "Em visualizacao" : "Consultar no site"}</button><button class="btn secondary" data-action="print-cash-html-report-compact" data-id="${esc(report.id)}">Imprimir 58mm</button></div></td></tr>`
           )
           .join("")}</tbody></table></div>`
         : `<div class="empty" style="margin-top:0.75rem;">Nenhum HTML de fechamento salvo ainda.</div>`}
+        ${selectedReport
+        ? `<div class="card" style="margin-top:0.85rem;">
+            <div class="actions" style="justify-content:space-between;align-items:center;gap:0.75rem;">
+              <div>
+                <h3 style="margin:0;">${esc(selectedReport.title || `Fechamento ${selectedReport.cashId || "-"}`)}</h3>
+                <p class="note" style="margin:0.25rem 0 0;">${esc(selectedReport.subtitle || "Consulta interna do HTML salvo")} | Arquivo ${esc(selectedReport.id)}</p>
+              </div>
+              <button type="button" class="btn secondary" data-action="close-cash-html-report-viewer">Fechar visualizacao</button>
+            </div>
+            <div style="margin-top:0.75rem;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;">
+              <iframe title="${esc(selectedReport.title || selectedReport.id)}" srcdoc="${esc(selectedReport.html)}" style="width:100%;min-height:78vh;border:0;background:#fff;"></iframe>
+            </div>
+          </div>`
+        : reports.length
+          ? `<div class="empty" style="margin-top:0.85rem;">Selecione um arquivo acima para consultar o HTML salvo sem sair do site.</div>`
+          : ""}
       </div>
     `;
   }
@@ -5307,7 +5485,7 @@
       { key: "finalizadas", label: "Comandas finalizadas" },
       { key: "cozinha", label: "Fila cozinha" },
       { key: "consulta", label: "Consulta precos" },
-      { key: "historico", label: "Historico" }
+      { key: "historico", label: "Contas" }
     ];
 
     const open = state.openComandas.length;
@@ -5396,7 +5574,8 @@
       { key: "funcionarios", label: "Funcionarios" },
       { key: "cozinha", label: "Cozinha" },
       { key: "financeiro", label: "Financas" },
-      { key: "caixa", label: "Fechar Caixa" }
+      { key: "caixa", label: "Fechar Caixa" },
+      { key: "arquivos_html", label: "Contas" }
     ];
 
     let content = "";
@@ -5418,6 +5597,9 @@
         break;
       case "caixa":
         content = renderAdminCash();
+        break;
+      case "arquivos_html":
+        content = renderAdminCashHtmlArchive();
         break;
       default:
         content = renderAdminComandas();
@@ -5471,6 +5653,202 @@
     `;
   }
 
+  function renderDevTools() {
+    const adminUser = state.users.find(u => u.role === "admin");
+    const waiterUsers = state.users.filter(u => u.role === "waiter");
+    return `
+      <div class="grid cols-2">
+        <div class="card">
+          <h3>Exclusao em Massa</h3>
+          <p class="note">Aviso: Isso apagara dados permanentemente (incluindo do Supabase)!</p>
+          <div class="actions" style="margin-top:0.75rem;">
+            <button class="btn danger" data-action="dev-bulk-delete" data-target="produtos">Apagar Todos os Produtos</button>
+            <button class="btn danger" data-action="dev-bulk-delete" data-target="comandas-abertas">Apagar Comandas Abertas</button>
+            <button class="btn danger" data-action="dev-bulk-delete" data-target="comandas-fechadas">Apagar Comandas Fechadas</button>
+            <button class="btn danger" data-action="dev-bulk-delete" data-target="historico">Apagar Historico (history90)</button>
+            <button class="btn danger" data-action="dev-bulk-delete" data-target="financeiro">Apagar Dados Financeiros (payables)</button>
+            <button class="btn danger" data-action="dev-bulk-delete" data-target="caixa">Apagar Relatorios de Caixa</button>
+            <button class="btn danger" data-action="dev-bulk-delete" data-target="tudo">Apagar Tudo (Reset Completo)</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Alterar Credenciais</h3>
+          <p class="note">Altere login e senha do administrador e garcons.</p>
+          <h4 style="margin-top:0.75rem;">Administrador</h4>
+          ${adminUser ? `
+            <form id="dev-change-admin-creds-form" class="form" style="margin-top:0.5rem;">
+              <input type="hidden" name="userId" value="${adminUser.id}" />
+              <div class="field">
+                <label>Novo Login</label>
+                <input name="login" required value="${esc(adminUser.login)}" />
+              </div>
+              <div class="field">
+                <label>Nova Senha</label>
+                <input name="password" type="password" required />
+              </div>
+              <button class="btn primary" type="submit">Salvar Credenciais do Admin</button>
+            </form>
+          ` : `<div class="empty">Nenhum administrador encontrado.</div>`}
+          <h4 style="margin-top:1rem;">Garcons</h4>
+          ${waiterUsers.length ? `
+            <div class="table-wrap" style="margin-top:0.5rem;">
+              <table class="responsive-stack">
+                <thead>
+                  <tr>
+                    <th>Garcom</th>
+                    <th>Login</th>
+                    <th>Nova Senha</th>
+                    <th>Acao</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${waiterUsers.map(waiter => `
+                    <tr>
+                      <td data-label="Garcom">${esc(waiter.name)}</td>
+                      <td data-label="Login">
+                        <form class="form inline-form" data-action="dev-change-waiter-login" style="margin:0;">
+                          <input type="hidden" name="userId" value="${waiter.id}" />
+                          <input type="text" name="login" value="${esc(waiter.login)}" required style="width:100%;" />
+                          <button class="btn secondary compact-action" type="submit">Salvar</button>
+                        </form>
+                      </td>
+                      <td data-label="Nova Senha">
+                        <form class="form inline-form" data-action="dev-change-waiter-password" style="margin:0;">
+                          <input type="hidden" name="userId" value="${waiter.id}" />
+                          <input type="password" name="password" required style="width:100%;" />
+                          <button class="btn secondary compact-action" type="submit">Salvar</button>
+                        </form>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : `<div class="empty">Nenhum garcom encontrado.</div>`}
+        </div>
+      </div>
+    `;
+  }
+
+  function performDevBulkDelete(target, actor) {
+    switch (target) {
+      case "produtos":
+        state.products = [];
+        break;
+      case "comandas-abertas":
+        state.openComandas = [];
+        break;
+      case "comandas-fechadas":
+        state.closedComandas = [];
+        break;
+      case "historico":
+        state.history90 = [];
+        break;
+      case "financeiro":
+        state.payables = [];
+        break;
+      case "caixa":
+        state.cashHtmlReports = [];
+        state.internalCashAudits = [];
+        break;
+      case "tudo":
+        // Reset everything except users (keep admin/waiter)
+        state.products = [];
+        state.openComandas = [];
+        state.closedComandas = [];
+        state.history90 = [];
+        state.payables = [];
+        state.cashHtmlReports = [];
+        state.internalCashAudits = [];
+        state.cookHistory = [];
+        state.auditLog = [];
+        uiState.remoteMonitorEvents = [];
+        // Reset cash
+        state.cash = {
+          id: `CX-${state.seq.cash++}`,
+          openedAt: "",
+          date: todayISO()
+        };
+        break;
+    }
+
+    saveState({
+      actor,
+      reason: "dev_bulk_delete",
+      cloudDelayMs: 0
+    });
+    alert(`Dados "${target}" apagados com sucesso!`);
+    render();
+  }
+
+  function performDevChangeAdminCreds(form, actor) {
+    const userId = Number(form.userId.value);
+    const login = form.login.value.trim();
+    const password = form.password.value;
+
+    const user = state.users.find(u => u.id === userId);
+    if (!user) {
+      alert("Usuario nao encontrado.");
+      return;
+    }
+
+    user.login = login;
+    user.password = password;
+    user.updatedAt = isoNow();
+
+    saveState({
+      actor,
+      reason: "dev_change_admin_creds",
+      cloudDelayMs: 0
+    });
+    alert("Credenciais do admin alteradas com sucesso!");
+    render();
+  }
+
+  function performDevChangeWaiterLogin(form, actor) {
+    const userId = Number(form.userId.value);
+    const login = form.login.value.trim();
+
+    const user = state.users.find(u => u.id === userId);
+    if (!user) {
+      alert("Usuario nao encontrado.");
+      return;
+    }
+
+    user.login = login;
+    user.updatedAt = isoNow();
+
+    saveState({
+      actor,
+      reason: "dev_change_waiter_login",
+      cloudDelayMs: 0
+    });
+    alert("Login do garcom alterado com sucesso!");
+    render();
+  }
+
+  function performDevChangeWaiterPassword(form, actor) {
+    const userId = Number(form.userId.value);
+    const password = form.password.value;
+
+    const user = state.users.find(u => u.id === userId);
+    if (!user) {
+      alert("Usuario nao encontrado.");
+      return;
+    }
+
+    user.password = password;
+    user.updatedAt = isoNow();
+
+    saveState({
+      actor,
+      reason: "dev_change_waiter_password",
+      cloudDelayMs: 0
+    });
+    alert("Senha do garcom alterada com sucesso!");
+    render();
+  }
+
   function renderDev(user) {
     if (uiState.devTab === "avulsa" || uiState.devTab === "monitor" || uiState.devTab === "impressao") {
       uiState.devTab = "dashboard";
@@ -5486,7 +5864,8 @@
       { key: "devices", label: "Dispositivos" },
       { key: "financeiro", label: "Financas" },
       { key: "caixa", label: "Fechar Caixa" },
-      { key: "arquivos_html", label: "Arquivos HTML" }
+      { key: "arquivos_html", label: "Contas" },
+      { key: "ferramentas-dev", label: "Ferramentas Dev" }
     ];
 
     let content = "";
@@ -5514,6 +5893,9 @@
         break;
       case "arquivos_html":
         content = renderAdminCashHtmlArchive();
+        break;
+      case "ferramentas-dev":
+        content = renderDevTools();
         break;
       default:
         content = renderAdminDashboard();
@@ -6338,7 +6720,7 @@
       { key: "abertas", label: "Comandas abertas" },
       { key: "cozinha", label: "Fila cozinha" },
       { key: "consulta", label: "Consulta precos" },
-      { key: "historico", label: "Historico" }
+      { key: "historico", label: "Contas" }
     ];
 
     let content = "";
@@ -7460,7 +7842,7 @@
       return;
     }
 
-    state.products.push({ id: state.seq.product++, name, category, subcategory, price, stock, prepTime, cost, available, requiresKitchen });
+    state.products.push({ id: state.seq.product++, name, category, subcategory, price, stock, prepTime, cost, available, requiresKitchen, updatedAt: isoNow() });
     appendAudit({ actor, type: "produto_add", detail: `Produto ${name} criado em ${categoryDisplay(category, subcategory)}.` });
     saveState();
     render();
@@ -7501,6 +7883,7 @@
     p.prepTime = Math.max(0, Number(prepTime));
     p.cost = Math.max(0, parseNumber(cost));
     p.available = available;
+    p.updatedAt = isoNow();
 
     appendAudit({ actor, type: "produto_edit", detail: `Produto ${p.name} alterado.` });
     saveState();
@@ -7512,6 +7895,7 @@
     const product = state.products.find((p) => p.id === productId);
     if (!product) return;
     product.available = product.available === false;
+    product.updatedAt = isoNow();
     appendAudit({
       actor,
       type: "produto_disponibilidade",
@@ -7576,7 +7960,8 @@
       functionName,
       login: loginValue,
       password,
-      active: true
+      active: true,
+      updatedAt: isoNow()
     });
 
     appendAudit({ actor, type: "funcionario_add", detail: `${roleLabel(role)} ${name} criado.` });
@@ -7616,6 +8001,7 @@
     user.functionName = functionName.trim() || user.functionName;
     user.login = loginValue.trim();
     user.password = password;
+    user.updatedAt = isoNow();
 
     appendAudit({ actor, type: "funcionario_edit", detail: `${roleLabel(user.role)} ${user.name} alterado.` });
     saveState();
@@ -7669,6 +8055,7 @@
     const oldLogin = adminUser.login;
     adminUser.login = newLogin;
     adminUser.password = newPassword;
+    adminUser.updatedAt = isoNow();
 
     const details = [];
     if (loginChanged) details.push(`login: ${oldLogin} -> ${adminUser.login}`);
@@ -8098,6 +8485,7 @@
     uiState.waiterActiveComandaId = comanda.id;
     uiState.waiterCollapsedByComanda[comanda.id] = true;
     saveState();
+    publishComandaUpsert(comanda, [], actor, "Comanda criada");
     render();
   }
 
@@ -8387,6 +8775,7 @@
 
     saveState();
     publishKitchenOrderUpsert(comanda, createdItems, actor, "Novo pedido");
+    publishComandaUpsert(comanda, createdItems, actor, "Item adicionado à comanda");
     if (AUTO_OPEN_KITCHEN_PREVIEW_ON_ADD) {
       const kitchenItemsToPreview = createdItems.filter((item) => item && itemNeedsKitchen(item));
       if (kitchenItemsToPreview.length) {
@@ -9560,6 +9949,13 @@
             .preview-content p { font-size: 12px; line-height: 1.35; }
             .preview-content h1, .preview-content h2, .preview-content h3, .preview-content h4 { margin: 8px 0 6px; }
             .preview-footer { margin-top: 10px; color: #4a5f7d; font-size: 12px; }
+            @media print {
+              @page { margin: 0; }
+              body { background: #fff; }
+              .preview-shell { max-width: none; padding: 0; }
+              .preview-header, .preview-footer { display: none; }
+              .preview-content { border: 0; border-radius: 0; padding: 0; overflow: visible; }
+            }
           </style>
         </head>
         <body>
@@ -9731,12 +10127,12 @@
     return `
       <html><head><meta charset="utf-8"><style>
         @page { size: ${width}mm auto; margin: 0; }
-        body { width: ${width}mm; margin: 0; padding: 3mm; box-sizing: border-box; font-family: Arial, sans-serif; color: #000; }
-        .receipt { width: 100%; font-size: 11px; line-height: 1.25; }
-        h3 { margin: 0 0 7px; font-size: 14px; text-align: center; }
-        p { margin: 3px 0; overflow-wrap: anywhere; }
-        hr { border: 0; border-top: 1px dashed #000; margin: 7px 0; }
-        .footer { font-size: 9px; text-align: center; }
+        body { width: ${width}mm; margin: 0; padding: 1.5mm 1.5mm 1mm; box-sizing: border-box; font-family: Arial, sans-serif; color: #000; }
+        .receipt { width: 100%; font-size: 11px; line-height: 1.2; }
+        h3 { margin: 0 0 4px; font-size: 14px; text-align: center; }
+        p { margin: 2px 0; overflow-wrap: anywhere; }
+        hr { border: 0; border-top: 1px dashed #000; margin: 4px 0; }
+        .footer { font-size: 9px; text-align: center; margin: 0; }
       </style></head><body><div class="receipt"><h3>${esc(title)}</h3><hr>${renderedLines}<hr><p class="footer">${esc(footer)}</p></div></body></html>`;
   }
 
@@ -9771,13 +10167,14 @@
         <head>
           <title>Cozinha ${esc(displayComandaId(comanda.id))}</title>
           <style>
-            body { font-family: monospace; margin: 0; padding: 10px; }
-            .ticket { width: 80mm; margin: 0 auto; color: #000; }
-            h2 { margin: 0 0 6px; font-size: 18px; text-align: center; }
+            @page { size: 80mm auto; margin: 0; }
+            body { width: 80mm; font-family: monospace; margin: 0; padding: 1.5mm 1.5mm 1mm; box-sizing: border-box; }
+            .ticket { width: 100%; margin: 0 auto; color: #000; }
+            h2 { margin: 0 0 4px; font-size: 18px; text-align: center; }
             p { margin: 2px 0; font-size: 12px; line-height: 1.25; }
-            hr { border: none; border-top: 1px dashed #000; margin: 7px 0; }
+            hr { border: none; border-top: 1px dashed #000; margin: 4px 0; }
             .meta { font-size: 11px; }
-            .item { margin: 0 0 6px; }
+            .item { margin: 0 0 4px; }
             .line.note { font-size: 11px; }
             .strong { font-weight: 700; }
           </style>
@@ -9858,7 +10255,7 @@
         `ITENS DO PEDIDO:\n${itemsText}`,
         "------------------------------",
         `Gerado em: ${formatDateTime(isoNow())}`,
-        "\n\n"
+        "\n"
       ];
 
       return ticketLines.filter(Boolean).join("\n");
@@ -9890,7 +10287,7 @@
         `Pagamento: ${comandaPaymentText(comanda || {}, { includeAmount: true, totalFallback: comandaTotal(comanda || {}) })}`,
         `Conferência de consumo. Obrigado!`,
         `Gerado em: ${formatDateTime(isoNow())}`,
-        "\n\n"
+        "\n"
       ];
 
       return receiptLines.filter(Boolean).join("\n");
@@ -9953,20 +10350,20 @@
             <title>Envio de Pedido ${esc(displayComandaId(comanda.id))}</title>
             <style>
               * { box-sizing: border-box; }
-              body { font-family: Arial, sans-serif; margin: 0; padding: 12px; color: #000; background: #fff; }
+              body { font-family: Arial, sans-serif; margin: 0; padding: 1.5mm 1.5mm 1mm; color: #000; background: #fff; }
               @page { size: ${paperWidthMm}mm auto; margin: 0; }
-              .receipt { width: min(100%, ${paperWidthMm}mm); margin: 0 auto; padding: 3mm; border: 2px dashed #000; }
+              .receipt { width: min(100%, ${paperWidthMm}mm); margin: 0 auto; padding: 1.5mm 1.5mm 1mm; border: 2px dashed #000; }
               h2, h3, p { margin: 0; }
               h2 { font-size: 14px; text-align: center; font-weight: bold; }
-              h3 { font-size: 16px; text-align: center; margin-top: 5px; font-weight: bold; text-transform: uppercase; border: 1px solid #000; padding: 4px; }
-              p { margin-top: 4px; font-size: 11px; }
-              .delivery-box { border: 1px dashed #000; padding: 6px; margin-top: 6px; font-size: 11px; background: #f9f9f9; }
-              table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
-              th, td { border-bottom: 1px dashed #000; padding: 6px 3px; text-align: left; vertical-align: top; }
+              h3 { font-size: 16px; text-align: center; margin-top: 3px; font-weight: bold; text-transform: uppercase; border: 1px solid #000; padding: 3px; }
+              p { margin-top: 2px; font-size: 11px; }
+              .delivery-box { border: 1px dashed #000; padding: 4px; margin-top: 4px; font-size: 11px; background: #f9f9f9; }
+              table { width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 12px; }
+              th, td { border-bottom: 1px dashed #000; padding: 4px 2px; text-align: left; vertical-align: top; }
               th { font-size: 9px; text-transform: uppercase; }
               .qty-cell { text-align: right; font-size: 14px; }
-              .item-obs { margin-top: 3px; font-size: 10px; color: #000; padding-left: 5px; }
-              .footer { margin-top: 8px; text-align: center; font-size: 9px; }
+              .item-obs { margin-top: 2px; font-size: 10px; color: #000; padding-left: 4px; }
+              .footer { margin-top: 5px; text-align: center; font-size: 9px; }
             </style>
           </head>
           <body>
@@ -9989,7 +10386,7 @@
               `}
 
               ${comandaNotes ? `
-                <div style="border: 1px dashed #000; padding: 6px; margin-top: 6px; font-size: 11px; background: #f9f9f9;">
+                <div style="border: 1px dashed #000; padding: 4px; margin-top: 4px; font-size: 11px; background: #f9f9f9;">
                   <strong>Observações da Comanda:</strong><br>
                   ${comandaNotes}
                 </div>
@@ -10034,21 +10431,21 @@
             <title>Cupom Cliente ${esc(displayComandaId(comanda.id))}</title>
             <style>
               * { box-sizing: border-box; }
-              body { font-family: Arial, sans-serif; margin: 0; padding: 12px; color: #000; background: #fff; }
+              body { font-family: Arial, sans-serif; margin: 0; padding: 1.5mm 1.5mm 1mm; color: #000; background: #fff; }
               @page { size: ${paperWidthMm}mm auto; margin: 0; }
-              .receipt { width: min(100%, ${paperWidthMm}mm); margin: 0 auto; padding: 3mm; border: 1px solid #ccc; border-radius: 6px; }
+              .receipt { width: min(100%, ${paperWidthMm}mm); margin: 0 auto; padding: 1.5mm 1.5mm 1mm; border: 1px solid #ccc; border-radius: 6px; }
               h2, h3, p { margin: 0; }
               h2 { font-size: 15px; text-align: center; }
-              h3 { margin-top: 5px; font-size: 14px; text-align: center; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 4px; }
-              p { margin-top: 4px; font-size: 11px; }
-              .delivery-info { margin-top: 4px; padding: 4px; border: 1px solid #eee; font-size: 11px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px; }
-              th, td { border-bottom: 1px solid #eee; padding: 5px 2px; text-align: left; vertical-align: top; }
+              h3 { margin-top: 3px; font-size: 14px; text-align: center; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 3px; }
+              p { margin-top: 2px; font-size: 11px; }
+              .delivery-info { margin-top: 3px; padding: 3px; border: 1px solid #eee; font-size: 11px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 11px; }
+              th, td { border-bottom: 1px solid #eee; padding: 4px 2px; text-align: left; vertical-align: top; }
               th { font-size: 9px; text-transform: uppercase; font-weight: bold; }
               td:nth-child(2), td:nth-child(3), td:nth-child(4), th:nth-child(2), th:nth-child(3), th:nth-child(4) { text-align: right; }
-              .total { margin-top: 8px; padding: 6px; border-radius: 4px; background: #f4f4f5; font-size: 14px; text-align: center; font-weight: bold; }
+              .total { margin-top: 5px; padding: 4px; border-radius: 4px; background: #f4f4f5; font-size: 14px; text-align: center; font-weight: bold; }
               .center { text-align: center; }
-              .footer-msg { margin-top: 8px; text-align: center; font-size: 10px; font-weight: bold; }
+              .footer-msg { margin-top: 5px; text-align: center; font-size: 10px; font-weight: bold; }
             </style>
           </head>
           <body>
@@ -10085,7 +10482,7 @@
               <div class="total">Valor Total: ${money(comandaTotal(comanda))}</div>
               <p><b>Forma de Pagamento:</b> ${esc(comandaPaymentText(comanda, { includeAmount: true, totalFallback: comandaTotal(comanda) }))}</p>
               <div class="footer-msg">Obrigado pela preferência! Volte sempre!</div>
-              <p class="center" style="font-size: 8px; margin-top: 8px; color: #666;">Documento sem valor fiscal para conferência de consumo.</p>
+              <p class="center" style="font-size: 8px; margin-top: 5px; color: #666;">Documento sem valor fiscal para conferência de consumo.</p>
             </div>
           </body>
         </html>
@@ -10161,6 +10558,9 @@
     const loginValue = form.login.value.trim();
     const password = form.password.value;
     const secondAuth = validateAdminCredentials(loginValue, password);
+    // #region debug-point A:close-cash-entry
+    fetch("http://127.0.0.1:7777/event", { method: "POST", body: JSON.stringify({ sessionId: "close-cashier-error", runId: "pre-fix", hypothesisId: "A", location: "app.js:closeCash:entry", msg: "[DEBUG] closeCash entry", data: { actorId: actor?.id ?? null, actorRole: actor?.role || "", cashId: state.cash?.id || "", hasLogin: Boolean(form?.login), hasPassword: Boolean(form?.password), openComandas: Array.isArray(state.openComandas) ? state.openComandas.length : -1, closedComandas: Array.isArray(state.closedComandas) ? state.closedComandas.length : -1 }, ts: Date.now() }) }).catch(() => { });
+    // #endregion
 
     if (!secondAuth) {
       alert("Segunda autenticacao invalida.");
@@ -10222,10 +10622,13 @@
     };
     const reportOptions = {
       printedBy: actor,
-      title: `Fechamento do caixa ${closure.cashId} | Dia ${formatDateOnlySafe(String(closure.openedAt || closedAt).slice(0, 10))}`,
-      subtitle: "Historico do dia apos fechamento"
+      title: `Fechamento detalhado do caixa ${closure.cashId} | Dia ${formatDateOnlySafe(String(closure.openedAt || closedAt).slice(0, 10))}`,
+      subtitle: "Historico detalhado do dia apos fechamento"
     };
-    const closureHtml = buildCashHistoryPrintHtml(closure, reportOptions);
+    // #region debug-point B:close-cash-before-html
+    fetch("http://127.0.0.1:7777/event", { method: "POST", body: JSON.stringify({ sessionId: "close-cashier-error", runId: "pre-fix", hypothesisId: "B", location: "app.js:closeCash:before-buildCashHistoryPrintHtml", msg: "[DEBUG] closeCash before buildCashHistoryPrintHtml", data: { closureId: closure.id, cashId: closure.cashId, openedAt, closedAt, commandasCount: Array.isArray(allDayComandas) ? allDayComandas.length : -1, typeofPageSize: typeof pageSize, typeofPaperWidthMm: typeof paperWidthMm }, ts: Date.now() }) }).catch(() => { });
+    // #endregion
+    const closureHtml = buildCashHistoryExtendedHtml(closure, reportOptions);
     const archivedHtmlReport = createCashHtmlReportRecord(closure, actor, closureHtml, reportOptions);
     const internalCashAudit = buildInternalCashAuditRecord({
       closure,
@@ -10263,7 +10666,7 @@
       previewTitle: reportOptions.title,
       previewSubtitle: `${reportOptions.subtitle} | Arquivo ${archivedHtmlReport.id}`
     });
-    alert(`Caixa fechado com sucesso.\nAbertura: ${formatCashOpenedAtLabel(openedAt)}\nFechamento: ${formatDateTimeWithDay(closedAt)}\nHistorico mantido por 90 dias.`);
+    alert(`Caixa fechado com sucesso.\nAbertura: ${formatCashOpenedAtLabel(openedAt)}\nFechamento: ${formatDateTimeWithDay(closedAt)}\nHistorico operacional mantido por 90 dias.\nHTML detalhado disponivel para consulta por 30 dias.`);
     render();
   }
 
@@ -10311,6 +10714,9 @@
 
   function reportUiRuntimeError(context, err) {
     console.error(`[ui:${context}]`, err);
+    // #region debug-point D:ui-runtime-error
+    fetch("http://127.0.0.1:7777/event", { method: "POST", body: JSON.stringify({ sessionId: "close-cashier-error", runId: "pre-fix", hypothesisId: "D", location: "app.js:reportUiRuntimeError", msg: `[DEBUG] ui runtime error in ${context}`, data: { context, name: err?.name || "", message: err?.message || String(err || ""), stack: String(err?.stack || "").split("\n").slice(0, 6).join(" | ") }, ts: Date.now() }) }).catch(() => { });
+    // #endregion
     alert("Ocorreu um erro ao processar a acao. A tela foi recarregada.");
   }
 
@@ -10417,6 +10823,20 @@
         return;
       }
 
+      if (action === "dev-bulk-delete") {
+        const target = button.dataset.target;
+        const actor = currentActor();
+        if (actor?.role !== "dev") {
+          alert("Apenas dev pode fazer exclusao em massa.");
+          return;
+        }
+        if (!confirm(`Tem certeza que deseja apagar "${target}"? Isso inclui o Supabase!`)) {
+          return;
+        }
+        performDevBulkDelete(target, actor);
+        return;
+      }
+
       if (action === "edit-employee") {
         editEmployee(Number(button.dataset.id));
         return;
@@ -10449,6 +10869,16 @@
 
       if (action === "open-cash-html-report") {
         openStoredCashHtmlReport(button.dataset.id);
+        return;
+      }
+
+      if (action === "close-cash-html-report-viewer") {
+        closeStoredCashHtmlReportViewer();
+        return;
+      }
+
+      if (action === "print-cash-html-report-compact") {
+        await printStoredCashHtmlReportCompact(button.dataset.id);
         return;
       }
 
@@ -10690,6 +11120,36 @@
 
       if (form.id === "delete-comanda-auth-form") {
         submitDeleteComandaAuth(form);
+      }
+
+      if (form.id === "dev-change-admin-creds-form") {
+        const actor = currentActor();
+        if (actor?.role !== "dev") {
+          alert("Apenas dev pode alterar credenciais.");
+          return;
+        }
+        performDevChangeAdminCreds(form, actor);
+        return;
+      }
+
+      if (form.matches('form[data-action="dev-change-waiter-login"]')) {
+        const actor = currentActor();
+        if (actor?.role !== "dev") {
+          alert("Apenas dev pode alterar credenciais.");
+          return;
+        }
+        performDevChangeWaiterLogin(form, actor);
+        return;
+      }
+
+      if (form.matches('form[data-action="dev-change-waiter-password"]')) {
+        const actor = currentActor();
+        if (actor?.role !== "dev") {
+          alert("Apenas dev pode alterar credenciais.");
+          return;
+        }
+        performDevChangeWaiterPassword(form, actor);
+        return;
       }
     } catch (err) {
       reportUiRuntimeError("submit", err);
