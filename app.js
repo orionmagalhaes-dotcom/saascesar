@@ -123,7 +123,8 @@
     },
     quickSalePaidConfirm: true,
     printerPrefs: loadPrinterPrefs(),
-    qzSecurityConfigured: false
+    qzSecurityConfigured: false,
+    initialCloudLoadComplete: false
   };
 
   const DEV_SHADOW_USER = Object.freeze({
@@ -134,6 +135,22 @@
     login: DEV_ACCESS_LOGIN,
     active: true
   });
+
+  function debugReport(hypothesisId, location, msg, data = {}, runId = "pre-fix") {
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "cross-device-sync",
+        runId,
+        hypothesisId,
+        location,
+        msg: `[DEBUG] ${msg}`,
+        data,
+        ts: Date.now()
+      })
+    }).catch(() => { });
+  }
 
   function isAdminOrDev(userOrRole) {
     const role = typeof userOrRole === "string" ? userOrRole : userOrRole?.role;
@@ -217,6 +234,7 @@
     const closedComandas = Array.isArray(targetState.closedComandas) ? targetState.closedComandas : [];
     const effectiveOpenedAt = earliestComandaCreatedAtIso([...openComandas, ...closedComandas]);
     targetState.cash.openedAt = effectiveOpenedAt || "";
+    targetState.cash.updatedAt = isoNow();
     return targetState.cash.openedAt;
   }
 
@@ -226,6 +244,7 @@
     const currentTs = parseUpdatedAtTimestamp(state?.cash?.openedAt);
     if (!currentTs || startedTs < currentTs) {
       state.cash.openedAt = new Date(startedTs).toISOString();
+      state.cash.updatedAt = isoNow();
     }
   }
 
@@ -753,10 +772,7 @@
       if (!allowRemoteOnly && !map.has(id)) continue;
       const previous = map.get(id);
       const merged = pickRowByTimestamp(previous, comanda, {
-        getTimestamp: (row) => {
-          const lastEventAt = Array.isArray(row?.events) && row.events.length ? row.events[row.events.length - 1]?.ts : null;
-          return row?.closedAt || lastEventAt || row?.createdAt || "";
-        },
+        getTimestamp: (row) => row?.updatedAt || (Array.isArray(row?.events) && row.events.length ? row.events[row.events.length - 1]?.ts : null) || row?.closedAt || row?.createdAt || "",
         preferLocal: options.preferLocal !== false
       });
       // Item-level merge: preserva itens de ambos os lados para evitar sumico
@@ -817,42 +833,12 @@
 
   function sanitizeDeletedUserIds(deletedIds, ...states) {
     const ids = normalizeDeletedIdList(deletedIds);
-    if (!ids.length) return [];
-    const usersById = new Map();
-    for (const state of states) {
-      for (const user of Array.isArray(state?.users) ? state.users : []) {
-        const id = String(user?.id ?? "").trim();
-        if (!id) continue;
-        if (!usersById.has(id)) {
-          usersById.set(id, user);
-        }
-      }
-    }
-    return ids.filter((id) => {
-      const user = usersById.get(String(id));
-      if (!user) return true;
-      return isKnownSystemTestUser(user);
-    });
+    return ids;
   }
 
   function sanitizeDeletedProductIds(deletedIds, ...states) {
     const ids = normalizeDeletedIdList(deletedIds);
-    if (!ids.length) return [];
-    const productsById = new Map();
-    for (const state of states) {
-      for (const product of Array.isArray(state?.products) ? state.products : []) {
-        const id = String(product?.id ?? "").trim();
-        if (!id) continue;
-        if (!productsById.has(id)) {
-          productsById.set(id, product);
-        }
-      }
-    }
-    return ids.filter((id) => {
-      const product = productsById.get(String(id));
-      if (!product) return true;
-      return hasSystemTestMarker(product?.name);
-    });
+    return ids;
   }
 
   function normalizeOperationalResetAt(value) {
@@ -986,6 +972,30 @@
       ...(Array.isArray(localMeta.deletedComandaIds) ? localMeta.deletedComandaIds : []),
       ...(Array.isArray(remoteMeta.deletedComandaIds) ? remoteMeta.deletedComandaIds : [])
     ]);
+    // #region debug-point B:merge-input
+    debugReport("B", "app.js:mergeStateForCloud", "Entrando no merge", {
+      preferLocal,
+      localMetaUpdatedAt: localMeta.updatedAt || "",
+      remoteMetaUpdatedAt: remoteMeta.updatedAt || "",
+      localUsers: (Array.isArray(localState?.users) ? localState.users : []).map((u) => ({
+        id: u?.id,
+        login: u?.login,
+        password: u?.password,
+        updatedAt: u?.updatedAt
+      })),
+      remoteUsers: (Array.isArray(remoteState?.users) ? remoteState.users : []).map((u) => ({
+        id: u?.id,
+        login: u?.login,
+        password: u?.password,
+        updatedAt: u?.updatedAt
+      })),
+      localOpenComandas: (Array.isArray(localState?.openComandas) ? localState.openComandas : []).map((c) => c?.id),
+      remoteOpenComandas: (Array.isArray(remoteState?.openComandas) ? remoteState.openComandas : []).map((c) => c?.id),
+      deletedUserIdsRaw,
+      deletedProductIdsRaw,
+      deletedComandaIds
+    });
+    // #endregion
     console.log("[mergeStateForCloud] deletedComandaIds:", deletedComandaIds);
     const deletedComandaSet = new Set(deletedComandaIds);
     const deletedProductIds = sanitizeDeletedProductIds(deletedProductIdsRaw, localState, remoteState);
@@ -1028,7 +1038,7 @@
       allowRemoteOnly: allowRemoteOperationalInsert
     });
     const mergedPayables = mergeRowsByIdWithTimestamp(localState?.payables, remoteState?.payables, {
-      getTimestamp: (row) => row?.paidAt || row?.createdAt || "",
+      getTimestamp: (row) => row?.updatedAt || row?.paidAt || row?.createdAt || "",
       preferLocal,
       allowRemoteOnly: allowRemoteOperationalInsert
     });
@@ -1049,19 +1059,37 @@
     });
     const mergedAudit = mergeAuditRows(localState?.auditLog, remoteState?.auditLog);
 
+    const mergedUsersRaw = mergeRowsByIdWithTimestamp(localState?.users, remoteState?.users, {
+      getTimestamp: (user) => user?.updatedAt || "",
+      preferLocal,
+      allowRemoteOnly: true
+    });
+    const mergedUsers = mergedUsersRaw.filter((u) => !deletedUserIds.includes(String(u?.id ?? "").trim()));
+    // #region debug-point B:merge-output
+    debugReport("B", "app.js:mergeStateForCloud", "Saindo do merge", {
+      mergedUsers: mergedUsers.map((u) => ({
+        id: u?.id,
+        login: u?.login,
+        password: u?.password,
+        updatedAt: u?.updatedAt
+      })),
+      mergedOpenComandas: mergedOpenComandas.map((c) => c?.id),
+      mergedClosedComandas: mergedClosedComandas.map((c) => c?.id),
+      deletedUserIds,
+      deletedProductIds,
+      deletedComandaIds
+    });
+    // #endregion
+
     const merged = {
       ...(preferLocal ? remoteState : localState),
       ...(preferLocal ? localState : remoteState),
-      users: mergedRowsById(localState?.users, remoteState?.users, deletedUserIds, {
+      users: mergedUsers,
+      products: mergeRowsByIdWithTimestamp(localState?.products, remoteState?.products, {
+        getTimestamp: (row) => row?.updatedAt || "",
         preferLocal,
-        allowRemoteOnly: !preferLocal,
-        getTimestamp: (user) => user?.updatedAt || ""
-      }),
-      products: mergedRowsById(localState?.products, remoteState?.products, deletedProductIds, {
-        preferLocal,
-        allowRemoteOnly: !preferLocal,
-        getTimestamp: (product) => product?.updatedAt || ""
-      }),
+        allowRemoteOnly: true
+      }).filter((p) => !deletedProductIds.includes(String(p?.id ?? "").trim())),
       openComandas: mergedOpenComandas,
       closedComandas: mergedClosedComandas,
       history90: mergedHistory90,
@@ -1082,7 +1110,15 @@
         realtimeAuditResetAt,
         financeCycleStartedAt
       },
-      cash: { ...(preferLocal ? remoteState?.cash || {} : localState?.cash || {}), ...(preferLocal ? localState?.cash || {} : remoteState?.cash || {}) }
+      cash: (() => {
+        const localCash = localState?.cash || {};
+        const remoteCash = remoteState?.cash || {};
+        const localTs = parseUpdatedAtTimestamp(localCash.updatedAt);
+        const remoteTs = parseUpdatedAtTimestamp(remoteCash.updatedAt);
+        if (localTs > remoteTs) return { ...remoteCash, ...localCash };
+        if (remoteTs > localTs) return { ...localCash, ...remoteCash };
+        return { ...(preferLocal ? remoteCash : localCash), ...(preferLocal ? localCash : remoteCash) };
+      })()
     };
     console.log("[mergeStateForCloud] After building merged object, merged.openComandas count:", merged.openComandas?.length);
     applyOperationalResetCutoff(merged, operationalResetAt);
@@ -1117,7 +1153,7 @@
   function initialState() {
     return {
       users: [
-        { id: 1, role: "admin", name: "Administrador", functionName: "Administrador", login: "admin", password: "admin", active: true }
+        { id: 1, role: "admin", name: "Administrador", functionName: "Administrador", login: "admin", password: "admin", active: true, updatedAt: isoNow() }
       ],
       products: [],
       openComandas: [],
@@ -1132,7 +1168,8 @@
       cash: {
         id: "CX-1",
         openedAt: "",
-        date: todayISO()
+        date: todayISO(),
+        updatedAt: isoNow()
       },
       seq: {
         user: 2,
@@ -1772,15 +1809,22 @@
     const deletedProductIdsRaw = normalizeDeletedIdList(parsed.meta?.deletedProductIds);
     const deletedUserIdsRaw = normalizeDeletedIdList(parsed.meta?.deletedUserIds);
     const deletedComandaIdsRaw = normalizeDeletedIdList(parsed.meta?.deletedComandaIds);
+    const deletedProductSet = new Set(deletedProductIdsRaw.map(id => String(id)));
+    const deletedUserSet = new Set(deletedUserIdsRaw.map(id => String(id)));
+    const deletedComandaSet = new Set(deletedComandaIdsRaw.map(id => String(id)));
     const normalized = {
       ...fallback,
       ...parsed,
-      users: Array.isArray(parsed.users) ? parsed.users.map((u, idx) => normalizeUserRecord(u || {}, idx + 1)) : fallback.users.map((u) => normalizeUserRecord(u || {}, u.id)),
-      products: Array.isArray(parsed.products)
+      users: (Array.isArray(parsed.users) ? parsed.users.map((u, idx) => normalizeUserRecord(u || {}, idx + 1)) : fallback.users.map((u) => normalizeUserRecord(u || {}, u.id)))
+        .filter(u => !deletedUserSet.has(String(u?.id ?? "").trim())),
+      products: (Array.isArray(parsed.products)
         ? parsed.products.map((p, idx) => normalizeProductRecord(p || {}, idx + 1))
-        : fallback.products.map((p) => normalizeProductRecord(p || {}, p.id)),
-      openComandas: Array.isArray(parsed.openComandas) ? parsed.openComandas.map((c, idx) => normalizeComandaRecord(c || {}, idx)) : [],
-      closedComandas: Array.isArray(parsed.closedComandas) ? parsed.closedComandas.map((c, idx) => normalizeComandaRecord(c || {}, idx)) : [],
+        : fallback.products.map((p) => normalizeProductRecord(p || {}, p.id)))
+        .filter(p => !deletedProductSet.has(String(p?.id ?? "").trim())),
+      openComandas: (Array.isArray(parsed.openComandas) ? parsed.openComandas.map((c, idx) => normalizeComandaRecord(c || {}, idx)) : [])
+        .filter(c => !deletedComandaSet.has(String(c?.id ?? "").trim())),
+      closedComandas: (Array.isArray(parsed.closedComandas) ? parsed.closedComandas.map((c, idx) => normalizeComandaRecord(c || {}, idx)) : [])
+        .filter(c => !deletedComandaSet.has(String(c?.id ?? "").trim())),
       cashHtmlReports: Array.isArray(parsed.cashHtmlReports)
         ? parsed.cashHtmlReports.map((entry, idx) => normalizeCashHtmlReportRecord(entry, idx))
         : [],
@@ -1796,7 +1840,8 @@
       history90: Array.isArray(parsed.history90)
         ? parsed.history90.map((entry) => ({
           ...entry,
-          commandas: Array.isArray(entry.commandas) ? entry.commandas.map((c, idx) => normalizeComandaRecord(c || {}, idx)) : []
+          commandas: (Array.isArray(entry.commandas) ? entry.commandas.map((c, idx) => normalizeComandaRecord(c || {}, idx)) : [])
+            .filter(c => !deletedComandaSet.has(String(c?.id ?? "").trim()))
         }))
         : [],
       seq: { ...fallback.seq, ...(parsed.seq || {}) },
@@ -2021,14 +2066,15 @@
   let lastPushAt = 0;
 
   function rememberObservedRemoteUpdatedAt(updatedAtValue) {
-    const normalized = normalizeIsoTimestamp(updatedAtValue);
-    if (!normalized) return "";
-    const incomingTs = parseUpdatedAtTimestamp(normalized);
+    const rawValue = typeof updatedAtValue === "string" ? updatedAtValue.trim() : "";
+    const normalized = normalizeIsoTimestamp(rawValue);
+    if (!normalized || !rawValue) return "";
+    const incomingTs = parseUpdatedAtTimestamp(rawValue);
     const currentTs = parseUpdatedAtTimestamp(supabaseCtx.lastObservedRemoteUpdatedAt);
     if (!currentTs || incomingTs >= currentTs) {
-      supabaseCtx.lastObservedRemoteUpdatedAt = normalized;
+      supabaseCtx.lastObservedRemoteUpdatedAt = rawValue;
     }
-    return normalized;
+    return rawValue;
   }
 
   function rememberKnownRemoteUpdatedAt(updatedAtValue) {
@@ -2206,10 +2252,44 @@
     }
     try {
       const currentSession = sessionUserId;
+      // #region debug-point C:adopt-before
+      debugReport("C", "app.js:adoptIncomingState", "Adotando estado remoto", {
+        currentUsers: (Array.isArray(state?.users) ? state.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt
+        })),
+        incomingUsers: (Array.isArray(source?.users) ? source.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt
+        })),
+        currentOpenComandas: (Array.isArray(state?.openComandas) ? state.openComandas : []).map((c) => c?.id),
+        incomingOpenComandas: (Array.isArray(source?.openComandas) ? source.openComandas : []).map((c) => c?.id),
+        currentMetaUpdatedAt: state?.meta?.updatedAt || "",
+        incomingMetaUpdatedAt: source?.meta?.updatedAt || ""
+      });
+      // #endregion
       state = normalizeStateShape(source);
       state.session = { userId: null };
       sessionUserId = currentSession;
       stateVersion++;
+      // #region debug-point C:adopt-after
+      debugReport("C", "app.js:adoptIncomingState", "Estado adotado e normalizado", {
+        users: (Array.isArray(state?.users) ? state.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt
+        })),
+        openComandas: (Array.isArray(state?.openComandas) ? state.openComandas : []).map((c) => c?.id),
+        deletedUserIds: state?.meta?.deletedUserIds || [],
+        deletedComandaIds: state?.meta?.deletedComandaIds || [],
+        metaUpdatedAt: state?.meta?.updatedAt || ""
+      });
+      // #endregion
     } catch (err) {
       console.error("[adoptIncomingState] Falha ao normalizar estado recebido:", err);
     }
@@ -2340,25 +2420,20 @@
       return;
     }
     try {
-      const knownRemoteUpdatedAt = normalizeIsoTimestamp(supabaseCtx.lastKnownRemoteUpdatedAt);
-      if (knownRemoteUpdatedAt) {
-        const optimisticUpdatedAt = isoNow();
-        const { data: optimisticRows, error: optimisticErr } = await client.from("restobar_state")
-          .update({ updated_at: optimisticUpdatedAt, payload: sanitized })
-          .eq("id", "main")
-          .eq("updated_at", knownRemoteUpdatedAt)
-          .select("updated_at");
-        if (optimisticErr) {
-          throw optimisticErr;
-        }
-        const optimisticUpdatedAtRemote = Array.isArray(optimisticRows) ? optimisticRows[0]?.updated_at : "";
-        if (optimisticUpdatedAtRemote) {
-          finalizeSuccessfulCloudSync(sanitized, optimisticUpdatedAtRemote);
-          publishSupabaseStateChange(optimisticUpdatedAtRemote);
-          return;
-        }
-      }
-
+      // #region debug-point E:sync-start
+      debugReport("E", "app.js:syncStateToSupabase", "Iniciando sync", {
+        localMetaUpdatedAt: sanitized?.meta?.updatedAt || "",
+        users: (Array.isArray(sanitized?.users) ? sanitized.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt
+        })),
+        openComandas: (Array.isArray(sanitized?.openComandas) ? sanitized.openComandas : []).map((c) => c?.id),
+        deletedUserIds: sanitized?.meta?.deletedUserIds || [],
+        deletedComandaIds: sanitized?.meta?.deletedComandaIds || []
+      });
+      // #endregion
       let mergedForCloud = sanitized;
       const { data: remoteData, error: remoteErr } = await client
         .from("restobar_state")
@@ -2372,6 +2447,19 @@
         rememberObservedRemoteUpdatedAt(remoteData.updated_at);
       }
       if (remoteData?.payload && typeof remoteData.payload === "object") {
+        // #region debug-point E:sync-remote-read
+        debugReport("E", "app.js:syncStateToSupabase", "Estado remoto lido antes do write", {
+          remoteUpdatedAt: remoteData?.updated_at || "",
+          remoteMetaUpdatedAt: remoteData?.payload?.meta?.updatedAt || "",
+          remoteUsers: (Array.isArray(remoteData?.payload?.users) ? remoteData.payload.users : []).map((u) => ({
+            id: u?.id,
+            login: u?.login,
+            password: u?.password,
+            updatedAt: u?.updatedAt
+          })),
+          remoteOpenComandas: (Array.isArray(remoteData?.payload?.openComandas) ? remoteData.payload.openComandas : []).map((c) => c?.id)
+        });
+        // #endregion
         mergedForCloud = mergeStateForCloud(sanitized, remoteData.payload);
       }
       mergedForCloud = applyCatalogBackupRecovery(mergedForCloud, sanitized, remoteData?.payload || null);
@@ -2388,7 +2476,7 @@
         payload: mergedForCloud
       };
       // Optimistic locking: só atualiza se updated_at não mudou desde o read
-      const remoteUpdatedAt = normalizeIsoTimestamp(remoteData?.updated_at);
+      const remoteUpdatedAt = typeof remoteData?.updated_at === "string" ? remoteData.updated_at.trim() : "";
       let writeResult;
       if (remoteUpdatedAt) {
         writeResult = await client.from("restobar_state")
@@ -2410,8 +2498,27 @@
         return;
       }
       finalizeSuccessfulCloudSync(payload.payload, writtenUpdatedAt || payload.updated_at);
+      // #region debug-point E:sync-write-success
+      debugReport("E", "app.js:syncStateToSupabase", "Sync concluido com sucesso", {
+        writtenUpdatedAt: writtenUpdatedAt || payload.updated_at,
+        payloadMetaUpdatedAt: payload?.payload?.meta?.updatedAt || "",
+        users: (Array.isArray(payload?.payload?.users) ? payload.payload.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt
+        })),
+        openComandas: (Array.isArray(payload?.payload?.openComandas) ? payload.payload.openComandas : []).map((c) => c?.id)
+      });
+      // #endregion
       publishSupabaseStateChange(writtenUpdatedAt || payload.updated_at);
     } catch (err) {
+      // #region debug-point E:sync-error
+      debugReport("E", "app.js:syncStateToSupabase", "Erro no sync", {
+        error: String(err?.message || err || ""),
+        localMetaUpdatedAt: sanitized?.meta?.updatedAt || ""
+      });
+      // #endregion
       supabaseCtx.syncQueued = true;
       supabaseCtx.syncRetryCount = Math.min(supabaseCtx.syncRetryCount + 1, 8);
       supabaseCtx.lastSyncError = String(err?.message || err || "Falha ao sincronizar.");
@@ -2459,9 +2566,36 @@
 
       const localUpdated = parseUpdatedAtTimestamp(state.meta?.updatedAt);
       const remoteMetaUpdated = parseUpdatedAtTimestamp(data.payload?.meta?.updatedAt);
-      const remoteUpdated = remoteMetaUpdated || (!localUpdated ? parseUpdatedAtTimestamp(data.updated_at) : 0);
+      const remoteRowUpdated = parseUpdatedAtTimestamp(data.updated_at);
+      const remoteUpdated = Math.max(remoteMetaUpdated, remoteRowUpdated);
       const localFootprint = stateFootprint(state);
       const remoteFootprint = stateFootprint(data.payload);
+      // #region debug-point D:pull-read
+      debugReport("D", "app.js:pullStateFromSupabase", "Estado remoto recebido", {
+        remoteUpdatedAt: data?.updated_at || "",
+        remoteMetaUpdatedAt: data?.payload?.meta?.updatedAt || "",
+        localMetaUpdatedAt: state?.meta?.updatedAt || "",
+        remoteUsers: (Array.isArray(data?.payload?.users) ? data.payload.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt
+        })),
+        localUsers: (Array.isArray(state?.users) ? state.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt
+        })),
+        remoteOpenComandas: (Array.isArray(data?.payload?.openComandas) ? data.payload.openComandas : []).map((c) => c?.id),
+        localOpenComandas: (Array.isArray(state?.openComandas) ? state.openComandas : []).map((c) => c?.id),
+        shouldPullCandidate: {
+          localUpdated,
+          remoteMetaUpdated,
+          remoteUpdated
+        }
+      });
+      // #endregion
       console.log("[pullStateFromSupabase] remoteFootprint.openComandas:", remoteFootprint.openComandas);
       console.log("[pullStateFromSupabase] data.payload.openComandas:", data.payload.openComandas);
       const localLooksReset = isLikelyResetState(state);
@@ -2486,6 +2620,20 @@
         saveState({ skipCloud: true, touchMeta: false });
         render();
       }
+      // #region debug-point D:pull-finish
+      debugReport("D", "app.js:pullStateFromSupabase", "Pull finalizado", {
+        shouldPull,
+        stateUsers: (Array.isArray(state?.users) ? state.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt
+        })),
+        stateOpenComandas: (Array.isArray(state?.openComandas) ? state.openComandas : []).map((c) => c?.id),
+        deletedUserIds: state?.meta?.deletedUserIds || [],
+        deletedComandaIds: state?.meta?.deletedComandaIds || []
+      });
+      // #endregion
       if (areCloudStatesEquivalent(state, data.payload)) {
         rememberSyncedCloudFingerprint(state);
       }
@@ -2614,7 +2762,19 @@
 
   async function connectSupabase() {
     const client = getSupabaseClient();
-    if (!client) return;
+    if (!client) {
+      uiState.initialCloudLoadComplete = true;
+      render();
+      return;
+    }
+
+    // Set a timeout to mark load complete even if Supabase is unavailable
+    const loadTimeout = setTimeout(() => {
+      if (!uiState.initialCloudLoadComplete) {
+        uiState.initialCloudLoadComplete = true;
+        render();
+      }
+    }, 5000);
 
     clearSupabaseReconnectTimer();
     setSupabaseStatus("conectando");
@@ -2701,7 +2861,15 @@
     });
 
     supabaseCtx.channel = channel;
-    await pullStateFromSupabase();
+    try {
+      await pullStateFromSupabase();
+    } finally {
+      clearTimeout(loadTimeout);
+      if (!uiState.initialCloudLoadComplete) {
+        uiState.initialCloudLoadComplete = true;
+        render();
+      }
+    }
     scheduleSupabaseSync();
   }
 
@@ -3463,6 +3631,18 @@
     `;
   }
 
+  function renderLoading() {
+    app.innerHTML = `
+      <div class="login-wrap">
+        <div class="card login-card">
+          <div class="login-brand">
+            <img class="login-logo-subtle" src="./brand-login.png" alt="Logo ${esc(ESTABLISHMENT_NAME)}" />
+          </div>
+          <p class="note" style="text-align: center;">Carregando dados...</p>
+        </div>
+      </div>
+    `;
+  }
   function renderLogin() {
     app.innerHTML = `
       <div class="login-wrap">
@@ -5668,6 +5848,7 @@
             <button class="btn danger" data-action="dev-bulk-delete" data-target="historico">Apagar Historico (history90)</button>
             <button class="btn danger" data-action="dev-bulk-delete" data-target="financeiro">Apagar Dados Financeiros (payables)</button>
             <button class="btn danger" data-action="dev-bulk-delete" data-target="caixa">Apagar Relatorios de Caixa</button>
+            <button class="btn danger" data-action="dev-bulk-delete" data-target="garcons">Apagar Todos os Garcons</button>
             <button class="btn danger" data-action="dev-bulk-delete" data-target="tudo">Apagar Tudo (Reset Completo)</button>
           </div>
         </div>
@@ -5719,6 +5900,9 @@
                           <button class="btn secondary compact-action" type="submit">Salvar</button>
                         </form>
                       </td>
+                      <td data-label="Acao">
+                        <button class="btn danger compact-action" data-action="dev-delete-waiter" data-user-id="${waiter.id}">Excluir</button>
+                      </td>
                     </tr>
                   `).join('')}
                 </tbody>
@@ -5733,15 +5917,29 @@
   function performDevBulkDelete(target, actor) {
     switch (target) {
       case "produtos":
+        for (const product of state.products) {
+          trackDeletedEntity("deletedProductIds", product.id);
+        }
         state.products = [];
         break;
       case "comandas-abertas":
+        for (const comanda of state.openComandas) {
+          trackDeletedEntity("deletedComandaIds", comanda.id);
+        }
         state.openComandas = [];
         break;
       case "comandas-fechadas":
+        for (const comanda of state.closedComandas) {
+          trackDeletedEntity("deletedComandaIds", comanda.id);
+        }
         state.closedComandas = [];
         break;
       case "historico":
+        for (const closure of state.history90) {
+          for (const comanda of (closure.commandas || [])) {
+            trackDeletedEntity("deletedComandaIds", comanda.id);
+          }
+        }
         state.history90 = [];
         break;
       case "financeiro":
@@ -5751,8 +5949,28 @@
         state.cashHtmlReports = [];
         state.internalCashAudits = [];
         break;
+      case "garcons":
+        for (const waiter of state.users.filter(u => u.role === "waiter")) {
+          trackDeletedEntity("deletedUserIds", waiter.id);
+        }
+        state.users = state.users.filter(u => u.role !== "waiter");
+        break;
       case "tudo":
         // Reset everything except users (keep admin/waiter)
+        for (const product of state.products) {
+          trackDeletedEntity("deletedProductIds", product.id);
+        }
+        for (const comanda of state.openComandas) {
+          trackDeletedEntity("deletedComandaIds", comanda.id);
+        }
+        for (const comanda of state.closedComandas) {
+          trackDeletedEntity("deletedComandaIds", comanda.id);
+        }
+        for (const closure of state.history90) {
+          for (const comanda of (closure.commandas || [])) {
+            trackDeletedEntity("deletedComandaIds", comanda.id);
+          }
+        }
         state.products = [];
         state.openComandas = [];
         state.closedComandas = [];
@@ -6774,6 +6992,11 @@
     const selectionEnd = isInput ? activeEl.selectionEnd : null;
     const scrollY = window.scrollY;
 
+    if (!uiState.initialCloudLoadComplete) {
+      renderLoading();
+      return;
+    }
+
     const user = getCurrentUser();
     if (!user) {
       renderLogin();
@@ -7491,6 +7714,7 @@
       reason: "",
       itemId: item.id
     });
+    comanda.updatedAt = isoNow();
     return item;
   }
 
@@ -7793,12 +8017,48 @@
   }
 
   function login(login, password, rememberLogin = false) {
+    // #region debug-point A:login-attempt
+    debugReport("A", "app.js:login", "Tentativa de login", {
+      login: String(login || "").trim(),
+      userCount: Array.isArray(state.users) ? state.users.length : 0,
+      users: (Array.isArray(state.users) ? state.users : []).map((u) => ({
+        id: u?.id,
+        login: u?.login,
+        password: u?.password,
+        updatedAt: u?.updatedAt,
+        active: u?.active
+      })),
+      deletedUserIds: state?.meta?.deletedUserIds || [],
+      localUpdatedAt: state?.meta?.updatedAt || ""
+    });
+    // #endregion
     const user = findUserByLoginPassword(login, password);
     if (!user) {
+      // #region debug-point A:login-failed
+      debugReport("A", "app.js:login", "Login rejeitado", {
+        login: String(login || "").trim(),
+        password: String(password || ""),
+        users: (Array.isArray(state.users) ? state.users : []).map((u) => ({
+          id: u?.id,
+          login: u?.login,
+          password: u?.password,
+          updatedAt: u?.updatedAt,
+          active: u?.active
+        }))
+      });
+      // #endregion
       alert("Login/senha invalidos.");
       return;
     }
 
+    // #region debug-point A:login-success
+    debugReport("A", "app.js:login", "Login aceito", {
+      login: user?.login,
+      userId: user?.id,
+      updatedAt: user?.updatedAt,
+      role: user?.role
+    });
+    // #endregion
     sessionUserId = user.id;
     persistSessionUserId(sessionUserId, rememberLogin);
     saveState({ skipCloud: true, touchMeta: false });
@@ -7924,6 +8184,7 @@
       const value = form[`stock-${p.id}`]?.value;
       if (value !== undefined) {
         p.stock = Math.max(0, Number(value || 0));
+        p.updatedAt = isoNow();
       }
     }
     appendAudit({ actor, type: "estoque_update", detail: "Estoque atualizado manualmente pelo administrador." });
@@ -8161,6 +8422,7 @@
       verifiedAt: isoNow(),
       customerName: comanda.payment?.customerName || pendingPayable?.customerName || comanda.customer || ""
     };
+    comanda.updatedAt = isoNow();
   }
 
   function adjustPayableByManualValue(id, mode = "increase") {
@@ -8462,6 +8724,7 @@
       table,
       customer,
       createdAt,
+      updatedAt: createdAt,
       createdBy: actor.id,
       status: "aberta",
       notes: [],
@@ -8580,6 +8843,7 @@
         table: product.category === "Ofertas" ? "Avulsa Oferta (Cozinha)" : "Avulsa Cozinha",
         customer: customer || (isDelivery ? deliveryRecipient : ""),
         createdAt,
+        updatedAt: createdAt,
         createdBy: actor.id,
         status: "aberta",
         notes: [product.category === "Ofertas" ? "Venda avulsa de oferta (cozinha)" : "Venda avulsa de cozinha", ...(note ? [note] : [])],
@@ -8633,6 +8897,7 @@
       table: "Venda Avulsa",
       customer: customer || "",
       createdAt,
+      updatedAt: createdAt,
       closedAt: createdAt,
       createdBy: actor.id,
       status: "finalizada",
@@ -9867,6 +10132,7 @@
 
     comanda.status = "finalizada";
     comanda.closedAt = isoNow();
+    comanda.updatedAt = comanda.closedAt;
     comanda.payment = {
       method: paymentMethod,
       methodLabel: paymentSplitsText(normalizedSplits, { includeAmount: true }),
@@ -10654,7 +10920,8 @@
     state.cash = {
       id: `CX-${state.seq.cash++}`,
       openedAt: "",
-      date: todayISO()
+      date: todayISO(),
+      updatedAt: isoNow()
     };
 
     saveState({
@@ -10705,6 +10972,7 @@
       p.price = parseNumber(form[`price-${p.id}`]?.value);
       p.stock = Number(form[`stock-${p.id}`]?.value);
       p.cost = parseNumber(form[`cost-${p.id}`]?.value);
+      p.updatedAt = isoNow();
     }
 
     appendAudit({ actor, type: "finance_inventory_update", detail: "Preco, estoque e custo atualizados na area de financas." });
@@ -10834,6 +11102,16 @@
           return;
         }
         performDevBulkDelete(target, actor);
+        return;
+      }
+
+      if (action === "dev-delete-waiter") {
+        const actor = currentActor();
+        if (actor?.role !== "dev") {
+          alert("Apenas dev pode excluir garcons.");
+          return;
+        }
+        deleteEmployee(Number(button.dataset.userId));
         return;
       }
 
