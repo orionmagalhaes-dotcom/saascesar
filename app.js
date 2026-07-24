@@ -1695,6 +1695,7 @@
           ? "ready"
           : "";
     const visualState = rawVisualState === "ready" && !item.kitchenAlertUnread ? "seen" : rawVisualState;
+    const deliveryRequested = Boolean(item.deliveryRequested);
     return {
       ...item,
       id: item.id || `IT-NORM-${fallbackId}`,
@@ -1711,7 +1712,11 @@
       kitchenReceivedByName: item.kitchenReceivedByName || "",
       kitchenAlertUnread: Boolean(item.kitchenAlertUnread),
       waiterVisualState: visualState,
-      waiterVisualUpdatedAt: item.waiterVisualUpdatedAt || null
+      waiterVisualUpdatedAt: item.waiterVisualUpdatedAt || null,
+      deliveryRequested,
+      deliveryRecipient: deliveryRequested ? String(item.deliveryRecipient || "") : "",
+      deliveryLocation: deliveryRequested ? String(item.deliveryLocation || "") : "",
+      deliveryFee: deliveryRequested ? parseNumber(item.deliveryFee || 0) : 0
     };
   }
 
@@ -3046,7 +3051,8 @@
   function comandaTotal(comanda) {
     return (comanda.items || []).reduce((sum, item) => {
       if (!itemCountsForTotal(item)) return sum;
-      return sum + parseNumber(item.qty || 0) * parseNumber(item.priceAtSale || 0);
+      const subtotal = sum + parseNumber(item.qty || 0) * parseNumber(item.priceAtSale || 0);
+      return subtotal + parseNumber(item.deliveryFee || 0);
     }, 0);
   }
 
@@ -6279,6 +6285,10 @@
                   <label>Local da entrega</label>
                   <input name="deliveryLocation" placeholder="Endereco/local de entrega" />
                 </div>
+                <div class="field">
+                  <label>Valor de entrega (R$ 1 a R$ 10)</label>
+                  <input name="deliveryFee" data-role="quick-delivery-fee" type="number" min="1" max="10" step="0.50" value="5" placeholder="Ex: 5" style="max-width: 10rem;" />
+                </div>
               </div>
             </div>
             <div class="field">
@@ -6436,6 +6446,22 @@
           `).join("") : `<div class="empty">Sem itens ainda.</div>`}
         </div>
 
+        ${(() => {
+          const deliveryRows = (comanda.items || []).filter((it) => !it.canceled && it.deliveryRequested && parseNumber(it.deliveryFee || 0) > 0);
+          const totalDelivery = deliveryRows.reduce((sum, it) => sum + parseNumber(it.deliveryFee || 0), 0);
+          if (!deliveryRows.length) return "";
+          const lines = deliveryRows
+            .slice()
+            .sort((a, b) => a.id.localeCompare(b.id))
+            .map((it) => `  • ${esc(it.name)} x${it.qty || 1} → ${money(parseNumber(it.deliveryFee || 0))}`)
+            .join("<br/>");
+          return `<div class="card" style="margin-top:0.5rem; padding:0.65rem 0.8rem;">
+            <b style="font-size:0.95rem;">🛵 Valor de entrega</b><br/>
+            ${lines}
+            <div style="margin-top:0.4rem; text-align:right;"><b>Total entrega: ${money(totalDelivery)}</b></div>
+          </div>`;
+        })()}
+
         <form class="form compact" data-role="${formRole}" data-comanda-id="${comanda.id}">
           <h4>Adicionar item</h4>
           <div class="grid cols-2">
@@ -6508,13 +6534,19 @@
           </div>
 
           <div class="grid cols-2" data-role="item-delivery-fields-box" style="display:none; margin-top: 0.5rem; gap: 0.5rem;">
-            <div class="field">
-              <label>Quem vai receber</label>
-              <input name="deliveryRecipient" data-role="item-recipient-input" placeholder="Nome de quem recebe" />
+            <div class="grid cols-2">
+              <div class="field">
+                <label>Quem vai receber</label>
+                <input name="deliveryRecipient" data-role="item-recipient-input" placeholder="Nome de quem recebe" />
+              </div>
+              <div class="field">
+                <label>Local de entrega</label>
+                <input name="deliveryLocation" data-role="item-location-input" placeholder="Endereço de entrega" />
+              </div>
             </div>
-            <div class="field">
-              <label>Local de entrega</label>
-              <input name="deliveryLocation" data-role="item-location-input" placeholder="Endereço de entrega" />
+            <div class="field" style="margin-top: 0.4rem;">
+              <label>Valor de entrega (R$ 1 a R$ 10)</label>
+              <input name="deliveryFee" data-role="item-delivery-fee" type="number" min="1" max="10" step="0.50" value="5" placeholder="Ex: 5" style="max-width: 10rem;" />
             </div>
           </div>
           <div class="note" data-role="kitchen-estimate">Tempo estimado cozinha: -</div>
@@ -7130,6 +7162,7 @@
     const deliveryFieldsBox = form.querySelector('[data-role="item-delivery-fields-box"]');
     const recipientInput = form.querySelector('[data-role="item-recipient-input"]');
     const locationInput = form.querySelector('[data-role="item-location-input"]');
+    const deliveryFeeInput = form.querySelector('[data-role="item-delivery-fee"]');
 
     if (!customizeCheck) return;
 
@@ -7149,6 +7182,7 @@
         if (deliveryFieldsBox) deliveryFieldsBox.style.display = "grid";
         if (recipientInput) recipientInput.required = true;
         if (locationInput) locationInput.required = true;
+        if (deliveryFeeInput) deliveryFeeInput.required = true;
       } else {
         if (deliveryFieldsBox) deliveryFieldsBox.style.display = "none";
         if (recipientInput) {
@@ -7158,6 +7192,10 @@
         if (locationInput) {
           locationInput.required = false;
           locationInput.value = "";
+        }
+        if (deliveryFeeInput) {
+          deliveryFeeInput.required = false;
+          deliveryFeeInput.value = "5";
         }
       }
     } else {
@@ -7176,6 +7214,10 @@
       if (locationInput) {
         locationInput.required = false;
         locationInput.value = "";
+      }
+      if (deliveryFeeInput) {
+        deliveryFeeInput.required = false;
+        deliveryFeeInput.value = "5";
       }
     }
   }
@@ -7351,6 +7393,7 @@
     const deliveryCheck = form.querySelector('[data-role="quick-delivery-check"]');
     const recipient = form.querySelector('input[name="deliveryRecipient"]');
     const location = form.querySelector('input[name="deliveryLocation"]');
+    const deliveryFeeInput = form.querySelector('[data-role="quick-delivery-fee"]');
     const note = form.querySelector('[data-role="quick-kitchen-note"]');
     const isKitchen = selectedProduct ? productNeedsKitchen(selectedProduct) : KITCHEN_CATEGORIES.has(category);
 
@@ -7359,7 +7402,7 @@
         ? "Item com fluxo de cozinha: sera criada uma comanda avulsa e o pedido entrara na fila da cozinha."
         : "Item sem fluxo de cozinha: a venda fecha imediatamente.";
     }
-    if (!deliveryBox || !deliveryFields || !deliveryCheck || !recipient || !location) return;
+    if (!deliveryBox || !deliveryFields || !deliveryCheck || !recipient || !location || !deliveryFeeInput) return;
 
     if (!isKitchen) {
       deliveryBox.style.display = "none";
@@ -7367,8 +7410,10 @@
       deliveryCheck.checked = false;
       recipient.required = false;
       location.required = false;
+      deliveryFeeInput.required = false;
       recipient.value = "";
       location.value = "";
+      deliveryFeeInput.value = "5";
       return;
     }
 
@@ -7376,6 +7421,7 @@
     deliveryFields.style.display = deliveryCheck.checked ? "grid" : "none";
     recipient.required = deliveryCheck.checked;
     location.required = deliveryCheck.checked;
+    deliveryFeeInput.required = deliveryCheck.checked;
   }
 
   function updateKitchenEstimate(form) {
@@ -7578,6 +7624,8 @@
     const waiterNoteRaw = hasNote ? String(form.waiterNote?.value || "").trim() : "";
     const deliveryRecipient = isDelivery ? String(form.deliveryRecipient?.value || "").trim() : "";
     const deliveryLocation = isDelivery ? String(form.deliveryLocation?.value || "").trim() : "";
+    const deliveryFeeRaw = isDelivery ? parseNumber(form.deliveryFee?.value || 0) : 0;
+    const deliveryFee = isDelivery ? Math.min(10, Math.max(1, deliveryFeeRaw)) : 0;
     const addonForItemId = String(form.addonForItemId?.value || "").trim();
     const addonProductIds = Array.from(form.querySelector('[data-role="lanche-addon-products"]')?.selectedOptions || [])
       .map((option) => String(option.value || "").trim())
@@ -7621,6 +7669,7 @@
           isDelivery,
           deliveryRecipient: isDelivery ? deliveryRecipient : "",
           deliveryLocation: isDelivery ? deliveryLocation : "",
+          deliveryFee: 0,
           addonForItemId: ""
         });
       }
@@ -7641,6 +7690,7 @@
         isDelivery,
         deliveryRecipient: isDelivery ? deliveryRecipient : "",
         deliveryLocation: isDelivery ? deliveryLocation : "",
+        deliveryFee,
         addonForItemId: addonForItemId || "",
         linkedAddonDrafts: addonDrafts
       }
@@ -7722,6 +7772,7 @@
       deliveryRequested: Boolean(draft.isDelivery),
       deliveryRecipient: draft.isDelivery ? draft.deliveryRecipient || "" : "",
       deliveryLocation: draft.isDelivery ? draft.deliveryLocation || "" : "",
+      deliveryFee: draft.isDelivery ? parseNumber(draft.deliveryFee || 0) : 0,
       canceled: false,
       canceledAt: null,
       cancelReason: "",
@@ -7776,6 +7827,8 @@
     if (form.isDelivery) form.isDelivery.checked = false;
     if (form.deliveryRecipient) form.deliveryRecipient.value = "";
     if (form.deliveryLocation) form.deliveryLocation.value = "";
+    const deliveryFeeReset = form.querySelector('[data-role="item-delivery-fee"]');
+    if (deliveryFeeReset) deliveryFeeReset.value = "5";
 
     updateDeliveryFields(form);
     updateKitchenEstimate(form);
@@ -8820,6 +8873,7 @@
     const isDeliveryRaw = Boolean(form.isDelivery?.checked);
     const deliveryRecipient = String(form.deliveryRecipient?.value || "").trim();
     const deliveryLocation = String(form.deliveryLocation?.value || "").trim();
+    const deliveryFeeRaw = Math.min(10, Math.max(1, parseNumber(form.deliveryFee?.value || 5)));
     const paidConfirm = formCheckboxChecked(form, "paidConfirm", uiState.quickSalePaidConfirm);
     uiState.quickSalePaidConfirm = paidConfirm;
     const requiresPaidConfirm = paymentMethod !== "fiado";
@@ -8887,6 +8941,7 @@
         deliveryRequested: isDelivery,
         deliveryRecipient: isDelivery ? deliveryRecipient : "",
         deliveryLocation: isDelivery ? deliveryLocation : "",
+        deliveryFee: isDelivery ? deliveryFeeRaw : 0,
         canceled: false,
         canceledAt: null,
         cancelReason: "",
@@ -9845,11 +9900,14 @@
     if (nextPriceRaw === null) return;
     const nextNoteRaw = prompt("Observacao:", String(item.waiterNote || ""));
     if (nextNoteRaw === null) return;
+    const nextDeliveryFeeRaw = prompt(item.deliveryRequested ? "Valor de entrega (R$):" : "Valor de entrega (R$; 0 para sem entrega):", String(item.deliveryFee || 0));
+    if (nextDeliveryFeeRaw === null) return;
 
     const nextName = String(nextNameRaw || "").trim() || String(item.name || "");
     const nextQty = Math.max(1, Math.floor(parseNumber(nextQtyRaw || 1)));
     const nextPrice = Math.max(0, parseNumber(nextPriceRaw));
     const nextNote = String(nextNoteRaw || "").trim();
+    const nextDeliveryFee = Math.max(0, Math.min(10, parseNumber(nextDeliveryFeeRaw || 0)));
     if (!Number.isFinite(nextQty) || nextQty <= 0) {
       alert("Quantidade invalida.");
       return;
@@ -9859,14 +9917,17 @@
     const prevQty = parseNumber(item.qty || 0);
     const prevPrice = parseNumber(item.priceAtSale || 0);
     const prevNote = String(item.waiterNote || "");
+    const prevDeliveryFee = parseNumber(item.deliveryFee || 0);
     const isOpenComanda = isComandaInOpenList(comanda.id);
     const pendingPayable = findPendingPayableByComandaId(comanda.id);
     const canAdjustStock = isOpenComanda || Boolean(pendingPayable);
     const stockChanges = [];
     const product = state.products.find((entry) => Number(entry.id) === Number(item.productId));
     const qtyDelta = nextQty - prevQty;
-    const prevBillable = itemCountsForTotal({ ...item, qty: prevQty, priceAtSale: prevPrice }) ? prevQty * prevPrice : 0;
-    const nextBillable = itemCountsForTotal({ ...item, qty: nextQty, priceAtSale: nextPrice }) ? nextQty * nextPrice : 0;
+    const prevSubtotal = itemCountsForTotal({ ...item, qty: prevQty, priceAtSale: prevPrice }) ? prevQty * prevPrice : 0;
+    const nextSubtotal = itemCountsForTotal({ ...item, qty: nextQty, priceAtSale: nextPrice }) ? nextQty * nextPrice : 0;
+    const prevBillable = prevSubtotal + prevDeliveryFee;
+    const nextBillable = nextSubtotal + nextDeliveryFee;
     const payableDelta = pendingPayable ? nextBillable - prevBillable : 0;
 
     if (pendingPayable && payableDelta < 0 && Number(pendingPayable.total || 0) + payableDelta < 0) {
@@ -9893,6 +9954,10 @@
     item.qty = nextQty;
     item.priceAtSale = nextPrice;
     item.waiterNote = nextNote;
+    item.deliveryFee = nextDeliveryFee;
+    if (nextDeliveryFee > 0) {
+      item.deliveryRequested = true;
+    }
     item.lastIncrementAt = isoNow();
 
     const changes = [];
@@ -9900,6 +9965,7 @@
     if (prevQty !== nextQty) changes.push(`qtd ${prevQty} -> ${nextQty}`);
     if (prevPrice !== nextPrice) changes.push(`preco ${money(prevPrice)} -> ${money(nextPrice)}`);
     if (prevNote !== nextNote) changes.push(`obs ${prevNote || "-"} -> ${nextNote || "-"}`);
+    if (prevDeliveryFee !== nextDeliveryFee) changes.push(`entrega ${money(prevDeliveryFee)} -> ${money(nextDeliveryFee)}`);
     if (stockChanges.length) changes.push(stockChanges.join(", "));
     if (pendingPayable && payableDelta !== 0) changes.push(`fiado ${money(prevBillable)} -> ${money(nextBillable)}`);
 
@@ -9959,7 +10025,9 @@
     const canAdjustStock = isOpenComanda || Boolean(pendingPayable);
     const qty = Math.max(0, parseNumber(item.qty || 0));
     const product = state.products.find((entry) => Number(entry.id) === Number(item.productId));
-    const itemBillableValue = itemCountsForTotal(item) ? qty * parseNumber(item.priceAtSale || 0) : 0;
+    const itemSubtotal = itemCountsForTotal(item) ? qty * parseNumber(item.priceAtSale || 0) : 0;
+    const itemDeliveryFee = parseNumber(item.deliveryFee || 0);
+    const itemBillableValue = itemSubtotal + itemDeliveryFee;
     const payableDelta = pendingPayable ? -itemBillableValue : 0;
     if (pendingPayable && payableDelta < 0 && Number(pendingPayable.total || 0) + payableDelta < 0) {
       alert("O ajuste deixaria o saldo do fiado negativo. Ajuste manualmente antes de remover este item.");
@@ -10551,6 +10619,8 @@
     const isOrderTicket = options.isOrderTicket;
     
     // Find delivery details from items
+    const deliveryItems = (comanda?.items || []).filter((i) => i && i.deliveryRequested && !i.canceled && parseNumber(i.deliveryFee || 0) > 0);
+    const totalDeliveryFee = deliveryItems.reduce((sum, i) => sum + parseNumber(i.deliveryFee || 0), 0);
     const deliveryItem = (comanda?.items || []).find((i) => i && i.deliveryRequested && !i.canceled);
     const hasDelivery = !!deliveryItem;
     const recipient = deliveryItem?.deliveryRecipient || "";
@@ -10563,7 +10633,7 @@
       const itemsText = groups
         .map(({ main, addons }) => {
           const obs = main.waiterNote ? `  * OBS COZINHA: ${main.waiterNote}\n` : "";
-          const del = main.deliveryRequested ? `  * PARA VIAGEM: ${main.deliveryRecipient} - ${main.deliveryLocation}\n` : "";
+          const del = main.deliveryRequested ? `  * PARA VIAGEM: ${main.deliveryRecipient} - ${main.deliveryLocation}${parseNumber(main.deliveryFee || 0) > 0 ? `  Entrega: ${money(parseNumber(main.deliveryFee || 0))}` : ""}\n` : "";
           const addonLines = addons.map(addon => `  + ${addon.name} x${parseNumber(addon.qty || 0)}\n`).join("");
           return `${String(main.name)} x${parseNumber(main.qty)}\n${addonLines}${obs}${del}`;
         })
@@ -10577,7 +10647,7 @@
         `Mesa/Ref: ${String(comanda?.table || "-")}`,
         `Cliente: ${String(comanda?.customer || "-")}`,
         "------------------------------",
-        hasDelivery ? `ENTREGA: SIM\nRecebe: ${recipient}\nOnde: ${location}` : "Entrega: No local",
+        hasDelivery ? `ENTREGA: SIM\nRecebe: ${recipient}\nOnde: ${location}${totalDeliveryFee > 0 ? `\nValor entrega: ${money(totalDeliveryFee)}` : ""}` : "Entrega: No local",
         "------------------------------",
         notesText ? `OBSERVAÇÕES DA COMANDA:\n${notesText}\n------------------------------` : "",
         `ITENS DO PEDIDO:\n${itemsText}`,
@@ -10606,6 +10676,7 @@
         })
         .join("\n") || "Sem itens";
 
+      const deliveryFeeLine = totalDeliveryFee > 0 ? `Valor de entrega: ${money(totalDeliveryFee)}` : "";
       const receiptLines = [
         `=== CUPOM DO CLIENTE ===`,
         `${ESTABLISHMENT_NAME}`,
@@ -10616,6 +10687,7 @@
         notesText ? `Observações: ${notesText}` : "",
         "------------------------------",
         itemsText,
+        deliveryFeeLine,
         "------------------------------",
         `TOTAL: ${money(comandaTotal(comanda || {}))}`,
         `Pagamento: ${comandaPaymentText(comanda || {}, { includeAmount: true, totalFallback: comandaTotal(comanda || {}) })}`,
@@ -10636,6 +10708,8 @@
     const isOrderTicket = options.isOrderTicket; // Check if we want the kitchen order ticket
 
     // Extract delivery details
+    const deliveryItems = (comanda.items || []).filter((i) => i && i.deliveryRequested && !i.canceled && parseNumber(i.deliveryFee || 0) > 0);
+    const totalDeliveryFee = deliveryItems.reduce((sum, i) => sum + parseNumber(i.deliveryFee || 0), 0);
     const deliveryItem = (comanda.items || []).find((i) => i && i.deliveryRequested && !i.canceled);
     const hasDelivery = !!deliveryItem;
     const recipient = deliveryItem?.deliveryRecipient || "";
@@ -10665,7 +10739,8 @@
         .map(({ main, addons }) => {
           const qty = parseNumber(main.qty || 0);
           const obs = main.waiterNote ? `<div class="item-obs">-> OBS COZINHA: <b>${esc(main.waiterNote)}</b></div>` : "";
-          const del = main.deliveryRequested ? `<div class="item-obs">-> PARA VIAGEM: <b>${esc(main.deliveryRecipient)}</b> @ <b>${esc(main.deliveryLocation)}</b></div>` : "";
+          const mainDeliveryFee = parseNumber(main.deliveryFee || 0);
+          const del = main.deliveryRequested ? `<div class="item-obs">-> PARA VIAGEM: <b>${esc(main.deliveryRecipient)}</b> @ <b>${esc(main.deliveryLocation)}</b>${mainDeliveryFee > 0 ? ` | <b>Entrega: ${esc(money(mainDeliveryFee))}</b>` : ""}</div>` : "";
           const addonLines = addons.map(addon => `<div style="padding-left: 8px;"><small>+ ${esc(addon.name)} x${parseNumber(addon.qty || 0)}</small></div>`).join("");
           return `
             <tr>
@@ -10716,7 +10791,7 @@
                 <div class="delivery-box">
                   <strong>* PEDIDO PARA ENTREGA *</strong><br>
                   <b>Quem recebe:</b> ${esc(recipient)}<br>
-                  <b>Onde recebe:</b> ${esc(location)}
+                  <b>Onde recebe:</b> ${esc(location)}${totalDeliveryFee > 0 ? `<br><b>Valor entrega:</b> ${esc(money(totalDeliveryFee))}` : ""}
                 </div>
               ` : `
                 <p><b>Entrega:</b> No local</p>
@@ -10830,6 +10905,7 @@
                 <thead><tr><th>Item</th><th>Qtd</th><th>Un.</th><th>Total</th></tr></thead>
                 <tbody>${rows || `<tr><td colspan="4">Sem itens</td></tr>`}</tbody>
               </table>
+              ${totalDeliveryFee > 0 ? `<div style="margin-top:5px; padding:4px; border:1px solid #eee; text-align:right; font-size:12px;"><b>Valor de entrega:</b> ${esc(money(totalDeliveryFee))}</div>` : ""}
               <div class="total">Valor Total: ${money(comandaTotal(comanda))}</div>
               <p><b>Forma de Pagamento:</b> ${esc(comandaPaymentText(comanda, { includeAmount: true, totalFallback: comandaTotal(comanda) }))}</p>
               <div class="footer-msg">Obrigado pela preferência! Volte sempre!</div>

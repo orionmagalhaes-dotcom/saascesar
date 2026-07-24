@@ -725,6 +725,98 @@ th {
   cursor: default;
 }
 
+/* ── Kitchen addons grouped section ─────────────────────────────────────── */
+.kitchen-order-addons {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #f4b647;
+  border-radius: 16px;
+  padding: 0.75rem 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+.kitchen-order-addons-label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #92400e;
+  margin-bottom: 0.15rem;
+}
+.kitchen-addon-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #e9ecf0;
+  flex-wrap: wrap;
+}
+.kitchen-addon-row.status-cooking { border-color: #f7b15a; background: #fffbf0; }
+.kitchen-addon-row.status-missing { border-color: #ea6b74; background: #fff5f6; }
+.kitchen-addon-row.status-done    { border-color: #5cbd8f; background: #f0faf5; }
+.kitchen-addon-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.kitchen-addon-qty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 800;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.kitchen-addon-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1e293b;
+  flex: 1;
+  min-width: 0;
+}
+.kitchen-addon-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: #f3f4f6;
+  color: #374151;
+  flex-shrink: 0;
+}
+.kitchen-addon-badge.status-cooking { background: #fff4e5; color: #92400e; }
+.kitchen-addon-badge.status-missing { background: #ffe9ec; color: #991b1b; }
+.kitchen-addon-badge.status-done    { background: #e8f7ee; color: #065f46; }
+.kitchen-addon-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.kitchen-addon-actions .btn {
+  min-height: 36px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 10px;
+  padding: 0 0.75rem;
+}
+/* ── end kitchen addons ──────────────────────────────────────────────────── */
+
 .kitchen-order-note {
   margin: 0.65rem 0 0;
   color: #334155;
